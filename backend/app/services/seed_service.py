@@ -78,6 +78,9 @@ def seed_alex_data():
         "medium", "high", "medium", "low", "medium", "medium",
         "high", "high", "medium", "high", "low", "high", "medium", "high",
     ]
+    # Map energy levels to valid brain_state values for daily_plans table
+    # Schema CHECK constraint: brain_state IN ('foggy', 'focused', 'wired')
+    energy_to_brain_state = {"low": "foggy", "medium": "focused", "high": "wired"}
     tasks_completed = [3, 4, 3, 2, 3, 4, 4, 5, 4, 5, 4, 5, 5, 5]
     tasks_total = [6, 6, 5, 6, 5, 6, 5, 6, 6, 6, 5, 6, 6, 6]
 
@@ -164,72 +167,81 @@ def seed_alex_data():
                 "status": status,
             })
 
+        brain_state = energy_to_brain_state[energy_levels[day_index]]
         plan_result = db.table("daily_plans").insert({
             "user_id": ALEX_UUID,
             "plan_date": checkin_date,
-            "brain_state": energy_levels[day_index],
+            "brain_state": brain_state,
             "tasks": plan_tasks,
-            "overall_rationale": f"Day {day_index + 1} plan optimized for {energy_levels[day_index]} energy.",
+            "overall_rationale": f"Day {day_index + 1} plan optimized for {brain_state} state ({energy_levels[day_index]} energy).",
         }).execute()
         plan_ids.append(plan_result.data[0]["id"] if plan_result.data else None)
 
     # ── 4. Interventions (Day 4 and Day 11) ──
     # Day 4 intervention (low energy day, stuck on task index 2)
+    day4_original_tasks = daily_task_titles[3]
+    day4_restructured = [
+        {"index": 0, "title": "5-min brain dump", "description": "Write down everything on your mind without filtering",
+         "duration_minutes": 5, "time_slot": "10:00", "category": "admin",
+         "rationale": "Externalize cognitive load to reduce overwhelm", "priority": "high", "status": "completed"},
+        {"index": 1, "title": "Reply to one easy email", "description": "Pick the shortest email and reply",
+         "duration_minutes": 5, "time_slot": "10:10", "category": "communication",
+         "rationale": "Quick win to build momentum", "priority": "high", "status": "completed"},
+        {"index": 2, "title": "Organize project files (15 min only)", "description": "Set a timer, stop when it rings",
+         "duration_minutes": 15, "time_slot": "10:20", "category": "admin",
+         "rationale": "Timeboxed to prevent perfectionism spiral", "priority": "medium", "status": "pending"},
+    ]
     db.table("interventions").insert({
         "user_id": ALEX_UUID,
-        "plan_id": plan_ids[3] or "",
+        "plan_id": plan_ids[3],
+        "trigger_type": "stuck_button",
         "stuck_task_index": 2,
         "user_message": "I can't focus on anything today, everything feels overwhelming.",
-        "acknowledgment": (
+        "emotional_acknowledgment": (
             "That makes total sense, Alex. Low-energy days are not failures -- they are data. "
             "Your brain is telling you it needs a different approach right now."
         ),
-        "restructured_tasks": [
-            {"index": 0, "title": "5-min brain dump", "description": "Write down everything on your mind without filtering",
-             "duration_minutes": 5, "time_slot": "10:00", "category": "admin",
-             "rationale": "Externalize cognitive load to reduce overwhelm", "priority": "high", "status": "completed"},
-            {"index": 1, "title": "Reply to one easy email", "description": "Pick the shortest email and reply",
-             "duration_minutes": 5, "time_slot": "10:10", "category": "communication",
-             "rationale": "Quick win to build momentum", "priority": "high", "status": "completed"},
-            {"index": 2, "title": "Organize project files (15 min only)", "description": "Set a timer, stop when it rings",
-             "duration_minutes": 15, "time_slot": "10:20", "category": "admin",
-             "rationale": "Timeboxed to prevent perfectionism spiral", "priority": "medium", "status": "pending"},
-        ],
+        "original_tasks": [{"index": i, "title": t} for i, t in enumerate(day4_original_tasks)],
+        "restructured_tasks": day4_restructured,
         "agent_reasoning": (
             "Detected low energy + overwhelm pattern. Broke tasks into micro-steps (5-15 min) to lower "
             "activation threshold. Prioritized externalization (brain dump) to reduce cognitive load, then "
             "a quick win for momentum. This matches Alex's Momentum-Builder profile tag."
         ),
-        "followup_hint": "How are you feeling after the brain dump? Want to tackle one more small thing?",
+        "followup_message": "How are you feeling after the brain dump? Want to tackle one more small thing?",
     }).execute()
 
     # Day 11 intervention (low energy day, stuck on task index 1)
+    day11_original_tasks = daily_task_titles[10]
+    day11_restructured = [
+        {"index": 0, "title": "Copy the comment into a fresh doc", "description": "Isolate it from the noisy PR interface",
+         "duration_minutes": 2, "time_slot": "11:00", "category": "deep-work",
+         "rationale": "Reduce visual clutter and context-switching cost", "priority": "high", "status": "completed"},
+        {"index": 1, "title": "Write 3 bullet points responding to the comment", "description": "No prose, just bullets",
+         "duration_minutes": 10, "time_slot": "11:05", "category": "deep-work",
+         "rationale": "Bullets lower the writing activation threshold vs. full sentences", "priority": "high", "status": "completed"},
+        {"index": 2, "title": "Convert bullets to a reply and submit", "description": "Polish only lightly",
+         "duration_minutes": 5, "time_slot": "11:20", "category": "communication",
+         "rationale": "Separate drafting from editing to reduce perfectionism", "priority": "medium", "status": "pending"},
+    ]
     db.table("interventions").insert({
         "user_id": ALEX_UUID,
-        "plan_id": plan_ids[10] or "",
+        "plan_id": plan_ids[10],
+        "trigger_type": "stuck_button",
         "stuck_task_index": 1,
         "user_message": "I keep re-reading the same code review comment and can't figure out what to write.",
-        "acknowledgment": (
+        "emotional_acknowledgment": (
             "Code review paralysis is real, especially on low-energy days. "
             "Let's break this down so you don't have to hold it all in working memory."
         ),
-        "restructured_tasks": [
-            {"index": 0, "title": "Copy the comment into a fresh doc", "description": "Isolate it from the noisy PR interface",
-             "duration_minutes": 2, "time_slot": "11:00", "category": "deep-work",
-             "rationale": "Reduce visual clutter and context-switching cost", "priority": "high", "status": "completed"},
-            {"index": 1, "title": "Write 3 bullet points responding to the comment", "description": "No prose, just bullets",
-             "duration_minutes": 10, "time_slot": "11:05", "category": "deep-work",
-             "rationale": "Bullets lower the writing activation threshold vs. full sentences", "priority": "high", "status": "completed"},
-            {"index": 2, "title": "Convert bullets to a reply and submit", "description": "Polish only lightly",
-             "duration_minutes": 5, "time_slot": "11:20", "category": "communication",
-             "rationale": "Separate drafting from editing to reduce perfectionism", "priority": "medium", "status": "pending"},
-        ],
+        "original_tasks": [{"index": i, "title": t} for i, t in enumerate(day11_original_tasks)],
+        "restructured_tasks": day11_restructured,
         "agent_reasoning": (
             "Detected working memory overload during code review. Alex's working memory score (51) suggests "
             "externalizing the problem is key. Split the task into isolate-draft-submit pipeline to reduce "
             "cognitive load at each step. Bullets-first approach lowers the initiation barrier (initiation score: 30)."
         ),
-        "followup_hint": "Once you submit that reply, take a 5-minute break. You earned it.",
+        "followup_message": "Once you submit that reply, take a 5-minute break. You earned it.",
     }).execute()
 
     # ── 5. Hypothesis Cards ──
@@ -241,7 +253,7 @@ def seed_alex_data():
             "the next day is likely to be a low-energy day (80% confidence based on 14-day pattern)."
         ),
         "confidence": "high",
-        "status": "testing",
+        "status": "active",
         "supporting_evidence": [
             {"day": 7, "detail": "Days 7-8 were high energy with 4-5 tasks completed, Day 9 dropped to medium"},
             {"day": 11, "detail": "Days 9-10 were high output, Day 11 was low energy with only 4/5 tasks"},

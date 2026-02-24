@@ -1,8 +1,9 @@
 import json
-from crewai import Agent, Task, Crew, Process
+from crewai import Agent, Task, Crew, Process, LLM
 from app.agents.tools.scoring_tools import score_asrs
 from app.agents.tools.db_tools import save_profile_to_db
 
+_llm = LLM(model="anthropic/claude-sonnet-4-20250514")
 
 screening_agent = Agent(
     role="ADHD Cognitive Portrait Specialist",
@@ -25,6 +26,7 @@ screening_agent = Agent(
         "- The summary should feel like recognition of how their brain works"
     ),
     tools=[score_asrs, save_profile_to_db],
+    llm=_llm,
     verbose=True,
 )
 

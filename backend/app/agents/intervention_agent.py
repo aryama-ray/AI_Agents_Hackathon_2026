@@ -1,10 +1,12 @@
 import json
-from crewai import Agent, Task, Crew, Process
+from crewai import Agent, Task, Crew, Process, LLM
 from app.agents.tools.db_tools import (
     get_cognitive_profile,
     get_current_plan,
     save_intervention,
 )
+
+_llm = LLM(model="anthropic/claude-sonnet-4-20250514")
 
 
 intervention_agent = Agent(
@@ -39,6 +41,7 @@ intervention_agent = Agent(
         "- Keep completed tasks unchanged"
     ),
     tools=[get_cognitive_profile, get_current_plan, save_intervention],
+    llm=_llm,
     allow_delegation=True,
     verbose=True,
 )

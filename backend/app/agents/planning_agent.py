@@ -1,6 +1,8 @@
 import json
-from crewai import Agent, Task, Crew, Process
+from crewai import Agent, Task, Crew, Process, LLM
 from app.agents.tools.db_tools import get_cognitive_profile, save_daily_plan
+
+_llm = LLM(model="anthropic/claude-sonnet-4-20250514")
 
 
 BRAIN_STATE_STRATEGIES = {
@@ -49,6 +51,7 @@ planning_agent = Agent(
         "chunks. You can always extend if momentum builds.'"
     ),
     tools=[get_cognitive_profile, save_daily_plan],
+    llm=_llm,
     verbose=True,
 )
 

@@ -14,7 +14,12 @@ async def guest_login():
     # Check if Alex exists
     result = db.table("users").select("*").eq("id", ALEX_UUID).execute()
     if result.data:
-        # Check if profile exists
+        # Check if seed data is complete (should have 14 checkins)
+        checkins = db.table("checkins").select("id", count="exact").eq("user_id", ALEX_UUID).execute()
+        if not checkins.count or checkins.count < 14:
+            # Seed data is incomplete or missing — re-seed
+            from app.services.seed_service import seed_alex_data
+            await asyncio.to_thread(seed_alex_data)
         profile = db.table("cognitive_profiles").select("id").eq("user_id", ALEX_UUID).limit(1).execute()
         return GuestLoginResponse(
             userId=ALEX_UUID,
