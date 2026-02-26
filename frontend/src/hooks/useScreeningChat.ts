@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef } from "react";
 import { useUser } from "@/hooks/useUser";
 import { ASRS_QUESTIONS, ANSWER_OPTIONS, type Question } from "@/lib/screeningData";
+import { saveScreeningRecord } from "@/lib/screeningStore";
 import api from "@/lib/api";
 
 export type Phase = "idle" | "questioning" | "evaluating" | "complete";
@@ -134,6 +135,18 @@ export function useScreeningChat(): UseScreeningChatReturn {
         }
 
         setResult(evalResult);
+
+        // Persist result with per-question detail for the profile page
+        saveScreeningRecord(user?.id ?? "guest", {
+          dimensions: evalResult.dimensions,
+          tags: evalResult.tags,
+          summary: evalResult.summary,
+          answers: newAnswers.map((a, i) => ({
+            ...a,
+            dimension: ASRS_QUESTIONS[i]?.dimension ?? "",
+          })),
+        });
+
         markProfileComplete();
         setPhase("complete");
       }, 500);

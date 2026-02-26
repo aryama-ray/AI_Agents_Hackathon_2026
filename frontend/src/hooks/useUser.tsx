@@ -7,7 +7,7 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import type { User, UserBackground } from "@/types";
+import type { User, UserBackground, TodayFeeling } from "@/types";
 import { STORAGE_KEYS } from "@/lib/constants";
 import { hashPassword } from "@/lib/auth";
 import { saveTodayPoint } from "@/lib/trendStore";
@@ -43,6 +43,8 @@ interface UserContextValue {
   loginAsGuest: () => void;
   giveConsent: () => void;
   saveBackground: (bg: UserBackground) => void;
+  updateTodayFeeling: (feeling: TodayFeeling) => void;
+  updateDemographics: (fields: Omit<UserBackground, "todayFeeling">) => void;
   logout: () => void;
   markProfileComplete: () => void;
 }
@@ -152,10 +154,45 @@ export function UserProvider({ children }: { children: ReactNode }) {
       );
       writeAccounts(accounts);
     }
-    // Save today's real mood data point derived from feeling responses
-    const { focusLevel, calmLevel } = bg.todayFeeling;
-    const moodScore = Math.round((focusLevel + calmLevel) / 2 * 2); // maps 1-5 avg → 2-10
+    // Mood point is recorded after the pre-screening check-in, not here
+  }
+
+  function updateTodayFeeling(feeling: TodayFeeling) {
+    if (!user) return;
+    const updated: User = {
+      ...user,
+      background: user.background
+        ? { ...user.background, todayFeeling: feeling }
+        : undefined,
+    };
+    setUser(updated);
+    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updated));
+    if (!updated.isGuest && updated.email) {
+      const accounts = readAccounts().map((a) =>
+        a.email === updated.email ? { ...a, user: updated } : a
+      );
+      writeAccounts(accounts);
+    }
+    // Average all four 1–5 scales and map to 2–10 mood score
+    const avg = (feeling.focusLevel + feeling.energyLevel + feeling.moodLevel + feeling.calmLevel) / 4;
+    const moodScore = Math.round(avg * 2);
     saveTodayPoint(updated.id, moodScore);
+  }
+
+  function updateDemographics(fields: Omit<UserBackground, "todayFeeling">) {
+    if (!user || !user.background) return;
+    const updated: User = {
+      ...user,
+      background: { ...fields, todayFeeling: user.background.todayFeeling },
+    };
+    setUser(updated);
+    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updated));
+    if (!updated.isGuest && updated.email) {
+      const accounts = readAccounts().map((a) =>
+        a.email === updated.email ? { ...a, user: updated } : a
+      );
+      writeAccounts(accounts);
+    }
   }
 
   function markProfileComplete() {
@@ -173,7 +210,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   return (
     <UserContext.Provider
-      value={{ user, isLoading, register, login, loginAsGuest, giveConsent, saveBackground, logout, markProfileComplete }}
+      value={{ user, isLoading, register, login, loginAsGuest, giveConsent, saveBackground, updateTodayFeeling, updateDemographics, logout, markProfileComplete }}
     >
       {children}
     </UserContext.Provider>

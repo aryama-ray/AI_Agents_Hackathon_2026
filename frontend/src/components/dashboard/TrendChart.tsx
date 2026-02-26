@@ -73,11 +73,12 @@ export default function TrendChart({ trend, annotations }: TrendChartProps) {
               borderRadius: 8,
               fontSize: 12,
             }}
-            formatter={(value: number, name: string) => [
-              `${value}%`,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            formatter={(value: any, name: any) => [
+              `${value ?? 0}%`,
               name === "moodScaled" ? "Mood (scaled)" : "Completion",
             ]}
-            labelFormatter={fmtDate}
+            labelFormatter={(label: unknown) => fmtDate(String(label))}
           />
           <Legend
             formatter={(value) =>

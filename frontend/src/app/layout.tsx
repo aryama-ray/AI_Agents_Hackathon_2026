@@ -45,7 +45,7 @@ export default function RootLayout({
       ].join(" ")}
       style={{ colorScheme: "light" }}
     >
-      <body className="antialiased bg-background text-foreground">
+      <body className="antialiased bg-background text-foreground" suppressHydrationWarning>
         <UserProvider>
           <Navbar />
           <main>{children}</main>

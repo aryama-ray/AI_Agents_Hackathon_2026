@@ -12,6 +12,17 @@ export type Ethnicity =
   | "pacific-islander"
   | "prefer-not-to-say";
 
+// Captured fresh before each screening session (not part of background form)
+export interface TodayFeeling {
+  focusLevel: number;   // 1–5
+  energyLevel: number;  // 1–5
+  moodLevel: number;    // 1–5
+  calmLevel: number;    // 1–5
+  wellRested: boolean;
+  hadCaffeine: boolean;
+  hadAlcohol: boolean;
+}
+
 export interface UserBackground {
   gender: Gender;
   ageRange: AgeRange;
@@ -19,14 +30,8 @@ export interface UserBackground {
   diagnosedADHD: boolean;
   diagnosedASD: boolean;
   diagnosedDepressionAnxiety: boolean;
-  takesMedication: boolean | null; // null = not applicable (no depression/anxiety)
-  todayFeeling: {
-    focusLevel: number;   // 1–5
-    calmLevel: number;    // 1–5
-    wellRested: boolean;
-    hadCaffeine: boolean;
-    hadAlcohol: boolean;
-  };
+  takesMedication: boolean | null; // null = not applicable
+  todayFeeling?: TodayFeeling;     // updated before each assessment, not during onboarding
 }
 
 // ─── User ────────────────────────────────────────────────────────────────────
@@ -120,6 +125,65 @@ export interface DashboardData {
   trend: TrendPoint[];
   annotations: AgentAnnotation[];
   hypotheses: Hypothesis[];
+}
+
+// ─── Daily Plan ───────────────────────────────────────────────────────────────
+
+export type BrainStateLevel = "low" | "medium" | "high";
+
+export interface BrainState {
+  focusLevel: BrainStateLevel;
+  energyLevel: BrainStateLevel;
+  moodLevel: BrainStateLevel;
+  context?: string;
+}
+
+export type TaskType = "deep-work" | "admin" | "break" | "social" | "routine";
+
+// A task the user typed in before generating their plan
+export interface UserTask {
+  title: string;
+  category: TaskType;
+}
+
+export interface PlanTask {
+  id: string;
+  title: string;
+  description?: string;
+  duration?: number;   // minutes
+  type?: TaskType;
+  completed: boolean;
+}
+
+export interface PlanResponse {
+  planId: string;
+  tasks: PlanTask[];
+  rationale?: string;
+  createdAt: string;
+}
+
+export interface InterventionResponse {
+  acknowledgment: string;
+  restructuredTasks: PlanTask[];
+  suggestion?: string;
+}
+
+// ─── Screening Record (persisted) ────────────────────────────────────────────
+
+export interface ScreeningAnswer {
+  questionId: string;
+  questionText: string;
+  dimension: string;
+  score: number;
+  answerLabel: string;
+}
+
+export interface ScreeningRecord {
+  date: string;                          // ISO date (YYYY-MM-DD)
+  dimensions: Record<string, number>;    // dimension → 0–100
+  tags: string[];
+  summary: string;
+  answers: ScreeningAnswer[];
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
