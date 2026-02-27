@@ -1,8 +1,11 @@
 import json
+import logging
 from crewai import Agent, Task, Crew, Process, LLM
 from app.agents.tools.scoring_tools import score_asrs
 from app.agents.tools.db_tools import save_profile_to_db
+from app.models import ScreeningOutput
 
+logger = logging.getLogger(__name__)
 _llm = LLM(model="anthropic/claude-sonnet-4-20250514")
 
 screening_agent = Agent(
@@ -27,7 +30,9 @@ screening_agent = Agent(
     ),
     tools=[score_asrs, save_profile_to_db],
     llm=_llm,
-    verbose=True,
+    max_rpm=20,
+    max_iter=10,
+    verbose=False,
 )
 
 
@@ -68,6 +73,7 @@ def create_screening_task(user_id: str, answers: list[dict]) -> Task:
             "profileTags (3 empowering tags), summary (2-3 sentence narrative), "
             "asrsTotalScore, isPositiveScreen, and profileId."
         ),
+        output_pydantic=ScreeningOutput,
         agent=screening_agent,
     )
 
@@ -78,14 +84,19 @@ def run_screening(user_id: str, answers: list[dict]) -> dict:
         agents=[screening_agent],
         tasks=[task],
         process=Process.sequential,
-        verbose=True,
+        memory=True,
+        verbose=False,
     )
     result = crew.kickoff()
-    # Parse the raw output into a dict
+
+    # Try structured output first (Pydantic model)
+    if hasattr(result, "pydantic") and result.pydantic is not None:
+        return result.pydantic.model_dump()
+
+    # Fallback to raw JSON parsing
+    logger.warning("Structured output unavailable, falling back to raw JSON parsing")
     raw = str(result.raw) if hasattr(result, "raw") else str(result)
-    # Try to extract JSON from the result
     try:
-        # Find JSON in the output
         start = raw.find("{")
         end = raw.rfind("}") + 1
         if start >= 0 and end > start:

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import type { InterventionResponse } from "@/types";
 import TaskCard from "@/components/plan/TaskCard";
 import Button from "@/components/ui/Button";
+import { submitInterventionFeedback } from "@/lib/api";
 
 interface InterventionPanelProps {
   intervention: InterventionResponse;
@@ -38,6 +39,26 @@ export default function InterventionPanel({ intervention, onClose }: Interventio
 
   // Collapsible reasoning
   const [showReasoning, setShowReasoning] = useState(false);
+
+  // Feedback
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackSent, setFeedbackSent] = useState(false);
+
+  async function handleSubmitFeedback() {
+    if (rating === 0 || !intervention.interventionId) return;
+    try {
+      await submitInterventionFeedback(
+        intervention.interventionId,
+        rating,
+        feedbackText || undefined,
+      );
+      setFeedbackSent(true);
+    } catch {
+      // Silently fail — feedback is optional
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -93,10 +114,58 @@ export default function InterventionPanel({ intervention, onClose }: Interventio
           </p>
         )}
 
-        {/* Close button */}
-        {showPlan && (
-          <div className="mt-6">
-            <Button variant="primary" size="lg" onClick={onClose} className="w-full">
+        {/* Feedback section */}
+        {showPlan && !showFeedback && !feedbackSent && (
+          <div className="mt-6 flex gap-3">
+            <Button variant="primary" size="lg" onClick={() => setShowFeedback(true)} className="flex-1">
+              Got it, let&apos;s go
+            </Button>
+          </div>
+        )}
+
+        {showFeedback && !feedbackSent && (
+          <div className="mt-4 border-t border-border pt-4">
+            <p className="text-sm text-muted-foreground">Was this intervention helpful?</p>
+            <div className="mt-2 flex gap-1">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  onClick={() => setRating(star)}
+                  className={`text-2xl transition-colors ${
+                    rating >= star ? "text-warning" : "text-faint-foreground"
+                  }`}
+                >
+                  ★
+                </button>
+              ))}
+            </div>
+            <textarea
+              placeholder="What would you change? (optional)"
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              className="mt-2 w-full rounded-lg border border-border bg-background p-3 text-sm text-foreground placeholder:text-faint-foreground focus:border-primary focus:outline-none"
+              rows={2}
+            />
+            <div className="mt-3 flex gap-3">
+              <Button variant="ghost" size="sm" onClick={onClose}>
+                Skip
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={async () => { await handleSubmitFeedback(); onClose(); }}
+                disabled={rating === 0}
+              >
+                Send & Continue
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {feedbackSent && (
+          <div className="mt-4 text-center">
+            <p className="text-sm text-muted-foreground">Thanks for your feedback!</p>
+            <Button variant="primary" size="lg" onClick={onClose} className="mt-3 w-full">
               Got it, let&apos;s go
             </Button>
           </div>

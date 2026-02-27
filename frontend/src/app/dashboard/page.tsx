@@ -48,7 +48,7 @@ export default function DashboardPage() {
     if (user) setLatestScreening(readLatestScreening(user.id));
   }, [user]);
 
-  const { data, isLoading: dashLoading } = useDashboard(user?.id ?? null);
+  const { data, isLoading: dashLoading, feedbackHistory } = useDashboard(user?.id ?? null);
 
   if (userLoading) {
     return (
@@ -190,6 +190,40 @@ export default function DashboardPage() {
             data.hypotheses.map((h) => (
               <HypothesisCard key={h.id} hypothesis={h} />
             ))
+          )}
+
+          {/* Intervention Feedback History */}
+          <p className="mt-4 text-xs font-medium uppercase tracking-widest text-faint-foreground">
+            Your Intervention Feedback
+          </p>
+          {feedbackHistory.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No intervention feedback yet.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {feedbackHistory.map((f) => (
+                <div
+                  key={f.id}
+                  className="rounded-lg border border-border bg-surface p-3"
+                >
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-warning">
+                      {"★".repeat(f.rating)}
+                      {"☆".repeat(5 - f.rating)}
+                    </span>
+                    <span className="text-faint-foreground text-xs">
+                      {formatDate(f.date)}
+                    </span>
+                  </div>
+                  {f.feedback && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {f.feedback}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>

@@ -7,19 +7,33 @@
 ## Architecture
 
 ```
-┌──────────────────────────────────────────┐
-│  Next.js Frontend (localhost:3000)        │
-│  Landing │ Screening │ Plan │ Dashboard   │
-└────────────────┬─────────────────────────┘
-                 │ axios → localhost:8000
-┌────────────────▼─────────────────────────┐
-│  FastAPI Backend (localhost:8000)          │
-│  3 CrewAI Agents + Supabase (PostgreSQL) │
-└──────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  Next.js Frontend (localhost:3000)                │
+│  Landing │ Screening │ Plan │ Dashboard │ Settings│
+│  Supabase Auth (JWT) + WebSocket client           │
+└────────────────┬─────────────────────────────────┘
+                 │ axios + JWT → localhost:8000
+┌────────────────▼─────────────────────────────────┐
+│  FastAPI Backend (localhost:8000)                  │
+│  Auth Middleware (JWT validation)                  │
+│  ┌─────────────────────────────────────────────┐  │
+│  │  CrewAI Orchestrator (Hierarchical Process) │  │
+│  │  ┌───────────┐ ┌──────────┐ ┌────────────┐ │  │
+│  │  │ Screening │ │ Planning │ │Intervention│ │  │
+│  │  │   Agent   │ │  Agent   │ │   Agent    │ │  │
+│  │  └───────────┘ └──────────┘ └────────────┘ │  │
+│  │  ┌───────────┐                              │  │
+│  │  │ Pattern   │  + Long-Term Memory          │  │
+│  │  │  Agent    │  + ADHD Knowledge Base       │  │
+│  │  └───────────┘  + Event Streaming           │  │
+│  └─────────────────────────────────────────────┘  │
+│  Supabase (PostgreSQL + Auth + RLS)               │
+└───────────────────────────────────────────────────┘
 ```
 
-**Backend:** Python, FastAPI, CrewAI, Supabase — **DONE** (on `backend` branch)
-**Frontend:** Next.js 16, React 19, Tailwind v4, TypeScript — **TO BUILD**
+**Backend:** Python, FastAPI, CrewAI, Supabase — **Phases 1-3 DONE**
+**Frontend:** Next.js 16, React 19, Tailwind v4, TypeScript — **Phases 1-3 DONE**
+**Phase 4:** Auth hardening, privacy, learning loops, agent orchestration — **TO BUILD**
 
 ---
 
@@ -48,6 +62,7 @@ Verify backend: `curl http://localhost:8000/` → `{"status":"ok"}`
 | **Phase 1** | Build frontend foundation (16 files) | Set up Supabase + test all backend endpoints |
 | **Phase 2** | Build Screening + Dashboard features | Build Planner + Intervention features |
 | **Phase 3** | Integration testing (together) | Integration testing (together) |
+| **Phase 4** | Frontend auth + privacy UI + feedback UI + WebSocket client | Backend auth + agents (memory, orchestrator, patterns) + privacy endpoints |
 
 ---
 
@@ -1540,4 +1555,1594 @@ curl -X POST http://localhost:8000/api/plan/intervene \
 curl -X POST http://localhost:8000/api/screening/evaluate \
   -H "Content-Type: application/json" \
   -d '{"userId":"00000000-0000-0000-0000-000000000001","answers":[{"questionIndex":0,"questionText":"...","score":3},{"questionIndex":1,"questionText":"...","score":2},{"questionIndex":2,"questionText":"...","score":3},{"questionIndex":3,"questionText":"...","score":4},{"questionIndex":4,"questionText":"...","score":2},{"questionIndex":5,"questionText":"...","score":1}]}'
+```
+
+---
+
+# PHASE 4 — PRODUCTION HARDENING & AGENT ENHANCEMENT
+
+> **Both people together.** This phase transforms the hackathon demo into a production-grade, funding-ready MVP. Work is split by sub-phase — auth must be completed first, then privacy/learning/validation can run in parallel, with orchestration last.
+
+---
+
+## Architecture Review — Why Phase 4 Exists
+
+### Current AI Agent Architecture (Phases 1-3)
+
+The 3 CrewAI agents operate as **independent, stateless, single-turn LLM calls**:
+
+```
+Frontend → FastAPI Route → CrewAI Agent (1 agent, 1 task) → Claude Sonnet 4 → JSON → Response
+```
+
+**What works well:**
+- Clear agent specialization (screening / planning / intervention)
+- Database-mediated context sharing (not agent chaining) — independently retryable
+- Deterministic operations correctly handled in Python (scoring, momentum calculation)
+- Intervention agent's "acknowledge → validate → restructure" sequence is genuinely valuable AI
+
+**What needs improvement:**
+
+| Gap | Problem | Impact |
+|-----|---------|--------|
+| **No auth** | Hardcoded Alex UUID, no JWT, RLS is "allow all" | Any client can access any user's data |
+| **No privacy** | ADHD screening = sensitive health data, no delete/export | GDPR/HIPAA non-compliant |
+| **No learning** | Agents are stateless, hypothesis cards pre-seeded | "Adaptive" positioning is hollow |
+| **Underutilized CrewAI** | Single-agent sequential crews, no memory/knowledge | Missing 60% of CrewAI's value |
+| **Fragile output** | JSON extracted via `raw.find("{")` | Breaks on malformed Claude output |
+| **No streaming** | 3-10s spinner wait for agent calls | Poor UX, no progress visibility |
+
+### Target Architecture (After Phase 4)
+
+```
+Frontend (Supabase Auth + JWT + WebSocket)
+    ↓
+FastAPI (Auth Middleware → validates JWT)
+    ↓
+CrewAI Orchestrator (Process.hierarchical)
+    ├─ Manager Agent (routes to specialists)
+    ├─ Screening Agent + Long-Term Memory
+    ├─ Planning Agent + Knowledge Base + User History
+    ├─ Intervention Agent + Memory + Feedback Loop
+    └─ Pattern Agent (generates hypothesis cards from real data)
+    ↓
+Supabase (RLS enforced per user, encrypted at rest)
+```
+
+---
+
+## Dependency Order
+
+```
+Phase 4A (Auth) ───────── MUST DO FIRST ──────────┐
+  ↓                                                │
+Phase 4B (Privacy)     ←── start after 4A-4        │ parallel
+Phase 4C (Learning)    ←── start after 4A-4        │ after 4A
+Phase 4E (Validation)  ←── start after 4A          │
+  ↓                                                │
+Phase 4D (Orchestration) ←── depends on 4A + 4C ──┘
+```
+
+---
+
+## Phase 4 Team Assignment
+
+| Sub-Phase | Person A | Person B |
+|-----------|----------|----------|
+| **4A: Auth** | 4A-5, 4A-6 (frontend auth + demo preservation) | 4A-1, 4A-2, 4A-3, 4A-4 (backend auth + middleware) |
+| **4B: Privacy** | 4B-3 (frontend settings page) | 4B-1, 4B-2, 4B-4 (backend endpoints + env docs) |
+| **4C: Learning** | 4C-4 (feedback UI) | 4C-1, 4C-2, 4C-3 (memory + history + pattern agent) |
+| **4D: Orchestration** | 4D-4 frontend (WebSocket client) | 4D-1, 4D-2, 4D-3, 4D-4 backend, 4D-5 |
+| **4E: Validation** | 4E-1 frontend, 4E-2 | 4E-1 backend, 4E-3 |
+
+---
+
+## Phase 4 File Ownership Map
+
+```
+backend/
+├── app/
+│   ├── middleware/
+│   │   └── auth.py              ← NEW (Person B) — JWT validation
+│   ├── routes/
+│   │   ├── auth.py              ← Person B (update for Supabase Auth)
+│   │   ├── screening.py         ← Person B (add auth dependency)
+│   │   ├── profile.py           ← Person B (add auth dependency)
+│   │   ├── plan.py              ← Person B (add auth dependency)
+│   │   ├── dashboard.py         ← Person B (add auth dependency + pattern agent)
+│   │   ├── user.py              ← NEW (Person B) — delete + export
+│   │   ├── feedback.py          ← NEW (Person B) — intervention feedback
+│   │   ├── analytics.py         ← NEW (Person B) — session tracking
+│   │   └── websocket.py         ← NEW (Person B) — WebSocket streaming
+│   ├── agents/
+│   │   ├── screening_agent.py   ← Person B (add memory + structured output)
+│   │   ├── planning_agent.py    ← Person B (add memory + history + knowledge)
+│   │   ├── intervention_agent.py← Person B (add memory + feedback context)
+│   │   ├── pattern_agent.py     ← NEW (Person B) — hypothesis generation
+│   │   ├── orchestrator.py      ← NEW (Person B) — hierarchical manager
+│   │   └── tools/
+│   │       └── db_tools.py      ← Person B (add save_hypothesis, save_feedback)
+│   ├── database.py              ← Person B (split anon + admin clients)
+│   └── services/
+│       └── seed_service.py      ← Person B (update for Supabase Auth)
+├── knowledge/                    ← NEW (Person B)
+│   ├── executive_function_strategies.md
+│   ├── intervention_playbook.md
+│   └── brain_state_research.md
+├── supabase/
+│   └── schema.sql               ← Person B (RLS + trigger + new columns)
+└── .env.example                  ← Person B (document keys)
+
+frontend/src/
+├── app/
+│   ├── page.tsx                 ← Person A (add "Try Demo" vs "Create Account")
+│   └── settings/
+│       └── page.tsx             ← NEW (Person A) — privacy controls
+├── components/
+│   ├── auth/
+│   │   └── GuestLoginButton.tsx ← Person A (Supabase Auth flow)
+│   └── plan/
+│       └── InterventionPanel.tsx← Person A (add feedback UI)
+├── hooks/
+│   ├── useUser.tsx              ← Person A (Supabase Auth rewrite)
+│   └── useDailyPlan.ts         ← Person A (WebSocket integration)
+└── lib/
+    └── api.ts                   ← Person A (JWT header attachment)
+```
+
+---
+
+## Phase 4A — Authentication (Supabase Auth)
+
+> **MUST COMPLETE FIRST.** Every other sub-phase depends on real user identity.
+
+### Task 4A-1: Supabase Auth Database Setup
+
+**Person B** — Update `backend/supabase/schema.sql`
+
+Add a migration section at the end of schema.sql:
+
+```sql
+-- ============================================================
+-- PHASE 4A: Authentication Migration
+-- ============================================================
+
+-- 1. Bridge auth.users → public.users automatically
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.users (id, email, name, is_guest)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'name', 'Guest'),
+    COALESCE((NEW.raw_user_meta_data->>'is_guest')::boolean, false)
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    name = COALESCE(EXCLUDED.name, users.name);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger: fires on every new Supabase Auth signup
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 2. Replace "Allow all" RLS policies with user-scoped policies
+-- Drop existing permissive policies
+DROP POLICY IF EXISTS "Allow all access" ON users;
+DROP POLICY IF EXISTS "Allow all access" ON asrs_responses;
+DROP POLICY IF EXISTS "Allow all access" ON cognitive_profiles;
+DROP POLICY IF EXISTS "Allow all access" ON daily_plans;
+DROP POLICY IF EXISTS "Allow all access" ON checkins;
+DROP POLICY IF EXISTS "Allow all access" ON interventions;
+DROP POLICY IF EXISTS "Allow all access" ON hypothesis_cards;
+
+-- Users: can only read/update own row
+CREATE POLICY "Users can view own data" ON users
+  FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Users can update own data" ON users
+  FOR UPDATE USING (auth.uid() = id);
+
+-- All other tables: scoped to user_id = auth.uid()
+CREATE POLICY "Own data only" ON asrs_responses
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Own data only" ON cognitive_profiles
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Own data only" ON daily_plans
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Own data only" ON checkins
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Own data only" ON interventions
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Own data only" ON hypothesis_cards
+  FOR ALL USING (auth.uid() = user_id);
+
+-- 3. Service role bypass: agent tools use service_role key which bypasses RLS
+-- No policy needed — service_role key inherently bypasses RLS in Supabase
+```
+
+Run this migration in Supabase SQL Editor after backing up existing data.
+
+### Task 4A-2: Backend Auth Middleware
+
+**Person B** — Create NEW file `backend/app/middleware/auth.py`
+
+```python
+from fastapi import Depends, HTTPException, Header
+from supabase import Client
+from app.database import get_supabase_anon
+from typing import Optional
+
+async def get_current_user(
+    authorization: Optional[str] = Header(None),
+    supabase: Client = Depends(get_supabase_anon),
+) -> str:
+    """
+    FastAPI dependency: extracts and validates Supabase JWT.
+    Returns the authenticated user_id.
+    All protected routes should use: user_id: str = Depends(get_current_user)
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+
+    token = authorization.removeprefix("Bearer ")
+
+    try:
+        response = supabase.auth.get_user(token)
+        if response.user is None:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return str(response.user.id)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+```
+
+### Task 4A-3: Split Supabase Clients
+
+**Person B** — Update `backend/app/database.py`
+
+```python
+from functools import lru_cache
+from supabase import create_client, Client
+from app.config import get_settings
+
+@lru_cache()
+def get_supabase_anon() -> Client:
+    """Client using anon key — respects RLS policies. Use in route handlers."""
+    settings = get_settings()
+    return create_client(settings.supabase_url, settings.supabase_key)
+
+@lru_cache()
+def get_supabase_admin() -> Client:
+    """Client using service_role key — bypasses RLS. Use ONLY in agent tools."""
+    settings = get_settings()
+    return create_client(settings.supabase_url, settings.supabase_service_role_key)
+
+# Backward compatibility: existing code uses get_supabase()
+def get_supabase() -> Client:
+    """Deprecated: use get_supabase_anon() or get_supabase_admin() instead."""
+    return get_supabase_anon()
+```
+
+Update all agent tools in `app/agents/tools/db_tools.py` to use `get_supabase_admin()` instead of `get_supabase()`.
+
+### Task 4A-4: Update All Route Handlers
+
+**Person B** — Add `Depends(get_current_user)` to all route functions.
+
+Pattern for each route file (`screening.py`, `profile.py`, `plan.py`, `dashboard.py`):
+
+```python
+from fastapi import Depends
+from app.middleware.auth import get_current_user
+
+# BEFORE:
+@router.post("/evaluate")
+async def evaluate_screening(request: ScreeningRequest):
+    user_id = request.userId  # ← Trusts client, insecure
+    ...
+
+# AFTER:
+@router.post("/evaluate")
+async def evaluate_screening(
+    request: ScreeningRequest,
+    user_id: str = Depends(get_current_user),  # ← Validated from JWT
+):
+    # user_id comes from JWT, not request body
+    ...
+```
+
+Update `auth.py` to support:
+- `POST /api/auth/guest` — calls `supabase.auth.sign_in_anonymously()`, seeds Alex data, returns session token
+- `POST /api/auth/signup` — calls `supabase.auth.sign_up(email, password, metadata)`, returns session token
+- `POST /api/auth/login` — calls `supabase.auth.sign_in_with_password(email, password)`, returns session token
+- `POST /api/auth/logout` — calls `supabase.auth.sign_out(token)`
+
+### Task 4A-5: Frontend Auth Integration
+
+**Person A** — Rewrite `frontend/src/hooks/useUser.tsx`
+
+Install Supabase client:
+```bash
+cd frontend && npm install @supabase/supabase-js
+```
+
+Create `frontend/src/lib/supabase.ts`:
+```ts
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+```
+
+Add to `frontend/.env.local`:
+```
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
+
+Rewrite `useUser.tsx` key methods:
+
+```tsx
+const loginAsGuest = useCallback(async () => {
+  setIsLoading(true);
+  try {
+    // 1. Create anonymous Supabase Auth session
+    const { data: authData, error: authError } = await supabase.auth.signInAnonymously();
+    if (authError) throw authError;
+
+    // 2. Call backend to seed Alex data (sends JWT automatically via api.ts)
+    const userData = await createGuestSession();
+
+    // 3. Store user state
+    setUser({
+      id: userData.userId,
+      name: userData.name,
+      isGuest: userData.isGuest,
+      hasProfile: userData.hasProfile,
+      // ... other fields
+    });
+  } finally {
+    setIsLoading(false);
+  }
+}, []);
+
+const signUp = useCallback(async (email: string, password: string, name: string) => {
+  setIsLoading(true);
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { name } },
+    });
+    if (error) throw error;
+    setUser({ id: data.user!.id, name, isGuest: false, hasProfile: false, ... });
+  } finally {
+    setIsLoading(false);
+  }
+}, []);
+
+const signIn = useCallback(async (email: string, password: string) => {
+  setIsLoading(true);
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    // Fetch user profile from backend...
+  } finally {
+    setIsLoading(false);
+  }
+}, []);
+```
+
+Update `frontend/src/lib/api.ts` to attach JWT:
+
+```ts
+import { supabase } from "./supabase";
+
+const api = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
+  headers: { "Content-Type": "application/json" },
+  timeout: 30000,
+});
+
+// Interceptor: attach Supabase JWT to every request
+api.interceptors.request.use(async (config) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  return config;
+});
+```
+
+### Task 4A-6: Preserve Demo Flow
+
+**Person A** — Ensure backward compatibility.
+
+- `POST /api/auth/guest` still creates Alex with seeded 14-day history
+- Alex is now created via `supabase.auth.sign_in_anonymously()` on the frontend, then backend seeds data for that auth.uid
+- If the anonymous user already has seeded data, skip re-seeding (idempotent check)
+- Landing page: "Continue as Guest" button still works identically to Phases 1-3
+- All demo steps (screening → plan → intervention → dashboard) work unchanged
+- The only visible change: JWT is now included in all API calls
+
+### Task 4A Gate
+
+Both people verify:
+- [ ] `POST /api/auth/guest` returns session token + Alex data
+- [ ] `POST /api/auth/signup` creates new Supabase Auth user + public.users row
+- [ ] All API calls include `Authorization: Bearer <token>` header
+- [ ] API calls without valid JWT return 401
+- [ ] User A cannot access User B's data (RLS enforced)
+- [ ] Full demo flow still works end-to-end with guest login
+
+---
+
+## Phase 4B — Privacy & Data Protection
+
+> **Can run in PARALLEL with 4C/4D after 4A is complete.**
+
+### Task 4B-1: Data Deletion Endpoint
+
+**Person B** — Create NEW file `backend/app/routes/user.py`
+
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from app.middleware.auth import get_current_user
+from app.database import get_supabase_admin
+
+router = APIRouter(prefix="/api/user", tags=["user"])
+
+@router.delete("/{user_id}")
+async def delete_user_data(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    """Delete all user data (cascading). GDPR Article 17: Right to Erasure."""
+    if current_user != user_id:
+        raise HTTPException(status_code=403, detail="Can only delete own data")
+
+    db = get_supabase_admin()
+
+    # Delete in dependency order (children first)
+    tables = [
+        "interventions",
+        "hypothesis_cards",
+        "checkins",
+        "daily_plans",
+        "cognitive_profiles",
+        "asrs_responses",
+        "users",
+    ]
+
+    for table in tables:
+        db.table(table).delete().eq("user_id" if table != "users" else "id", user_id).execute()
+
+    # Also delete from Supabase Auth
+    db.auth.admin.delete_user(user_id)
+
+    return {"status": "deleted", "userId": user_id}
+```
+
+Register router in `main.py`:
+```python
+from app.routes.user import router as user_router
+app.include_router(user_router)
+```
+
+### Task 4B-2: Data Export Endpoint
+
+**Person B** — Add to `backend/app/routes/user.py`
+
+```python
+@router.get("/{user_id}/export")
+async def export_user_data(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    """Export all user data as JSON. GDPR Article 20: Data Portability."""
+    if current_user != user_id:
+        raise HTTPException(status_code=403, detail="Can only export own data")
+
+    db = get_supabase_admin()
+
+    export = {
+        "exportDate": datetime.utcnow().isoformat(),
+        "userId": user_id,
+        "user": db.table("users").select("*").eq("id", user_id).execute().data,
+        "screeningAnswers": db.table("asrs_responses").select("*").eq("user_id", user_id).execute().data,
+        "cognitiveProfiles": db.table("cognitive_profiles").select("*").eq("user_id", user_id).execute().data,
+        "dailyPlans": db.table("daily_plans").select("*").eq("user_id", user_id).execute().data,
+        "checkins": db.table("checkins").select("*").eq("user_id", user_id).execute().data,
+        "interventions": db.table("interventions").select("*").eq("user_id", user_id).execute().data,
+        "hypothesisCards": db.table("hypothesis_cards").select("*").eq("user_id", user_id).execute().data,
+    }
+
+    return export
+```
+
+### Task 4B-3: Frontend Privacy Controls
+
+**Person A** — Create NEW file `frontend/src/app/settings/page.tsx`
+
+```
+"use client"
+
+<PageContainer>
+  <h1 className="font-serif text-3xl font-bold text-foreground">Settings</h1>
+
+  <Card>
+    <h2 className="font-semibold text-lg">Your Data</h2>
+    <p className="text-muted-foreground text-sm">
+      Attune stores your screening results, daily plans, and intervention history.
+      All data is encrypted and only accessible to you.
+    </p>
+
+    <div className="flex gap-4 mt-4">
+      <Button variant="secondary" onClick={handleExport}>
+        Export My Data (JSON)
+      </Button>
+      <Button variant="danger" onClick={() => setShowDeleteConfirm(true)}>
+        Delete All My Data
+      </Button>
+    </div>
+  </Card>
+
+  {/* Delete confirmation dialog */}
+  {showDeleteConfirm && (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center">
+      <Card padding="lg" className="max-w-md">
+        <h3 className="font-semibold text-lg text-error">Delete All Data?</h3>
+        <p className="text-muted-foreground text-sm mt-2">
+          This will permanently delete your screening results, plans, interventions,
+          and account. This action cannot be undone.
+        </p>
+        <div className="flex gap-4 mt-6">
+          <Button variant="ghost" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+          <Button variant="danger" onClick={handleDelete}>Yes, Delete Everything</Button>
+        </div>
+      </Card>
+    </div>
+  )}
+</PageContainer>
+```
+
+Add "Settings" link to Navbar.
+
+### Task 4B-4: Update Environment Documentation
+
+**Person B** — Update `backend/.env.example`
+
+```bash
+# === Anthropic (Claude API for CrewAI agents) ===
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+# === Supabase ===
+# Project URL (public)
+SUPABASE_URL=https://your-project.supabase.co
+
+# Anon key (safe for client-side, respects RLS)
+SUPABASE_KEY=your-anon-key
+
+# Service role key (NEVER expose to client — bypasses RLS, used ONLY by agent tools)
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# === Frontend ===
+FRONTEND_URL=http://localhost:3000
+```
+
+### Task 4B Gate
+
+Both verify:
+- [ ] `DELETE /api/user/{userId}` removes all 7 tables + Supabase Auth user
+- [ ] `GET /api/user/{userId}/export` returns complete JSON bundle
+- [ ] Cannot delete/export another user's data (403)
+- [ ] Settings page renders with export + delete buttons
+- [ ] Delete confirmation dialog prevents accidental deletion
+- [ ] Demo flow still works after privacy features added
+
+---
+
+## Phase 4C — Learning Loops (CrewAI Memory + Pattern Agent)
+
+> **The highest-value agent enhancement.** Can run in PARALLEL with 4B after 4A.
+
+### Task 4C-1: Enable CrewAI Long-Term Memory
+
+**Person B** — Update all 3 agent files.
+
+Install dependency:
+```bash
+cd backend && pip install chromadb && pip freeze > requirements.txt
+```
+
+Pattern for each agent file (`screening_agent.py`, `planning_agent.py`, `intervention_agent.py`):
+
+```python
+from crewai.memory.long_term.long_term_memory import LongTermMemory
+
+# In the crew creation function:
+crew = Crew(
+    agents=[agent],
+    tasks=[task],
+    process=Process.sequential,
+    memory=True,  # Enables all memory types (short-term + long-term + entity)
+    verbose=False,
+)
+```
+
+**What this enables:**
+- **Screening Agent:** Remembers past screening results → can note changes ("Your attention regulation has improved since last screening")
+- **Planning Agent:** Remembers what worked → "Last Tuesday's plan with 20-min blocks had 85% completion — reusing that structure"
+- **Intervention Agent:** Remembers stuck patterns → "This is the third time you've gotten stuck on deep work after 2pm"
+
+### Task 4C-2: Inject User History into Planning Agent
+
+**Person B** — Update `backend/app/agents/planning_agent.py`
+
+The `get_user_history` tool already exists in `db_tools.py` but is **never used**. Add it to the planning agent's tools:
+
+```python
+from app.agents.tools.db_tools import get_cognitive_profile, save_daily_plan, get_user_history
+
+planning_agent = Agent(
+    role="Executive Function Planning Strategist",
+    tools=[get_cognitive_profile, save_daily_plan, get_user_history],  # ← Added
+    # ... rest unchanged
+)
+```
+
+Update the task description to include history-aware instructions:
+
+```python
+planning_task = Task(
+    description=f"""
+    Create a brain-state-adaptive daily plan for user {user_id} with brain state: {brain_state}.
+
+    STEP 1: Fetch the user's cognitive profile using the get_cognitive_profile tool.
+    STEP 2: Fetch the user's recent history using the get_user_history tool.
+    STEP 3: Analyze patterns in the history:
+      - Which task categories had highest completion rates?
+      - What time slots worked best for deep work?
+      - Were there recent interventions? What was the stuck pattern?
+      - What brain states correlated with best outcomes?
+    STEP 4: Generate the plan, using history to justify task placement:
+      - "Based on your history, you complete creative tasks best in the morning"
+      - "Your last 3 focused-state plans averaged 80% completion with 45-min blocks"
+      - "You got stuck on admin tasks twice last week — scheduling earlier today"
+
+    ... (existing brain state strategies remain unchanged) ...
+    """,
+    # ... rest unchanged
+)
+```
+
+### Task 4C-3: Create Pattern Detection Agent
+
+**Person B** — Create NEW file `backend/app/agents/pattern_agent.py`
+
+```python
+from crewai import Agent, Task, Crew, Process, LLM
+from app.agents.tools.db_tools import get_user_history, save_hypothesis_card
+
+_llm = LLM(model="anthropic/claude-sonnet-4-20250514")
+
+pattern_agent = Agent(
+    role="Behavioral Pattern Analyst",
+    goal=(
+        "Analyze longitudinal user data (checkins, plan completions, interventions) "
+        "to detect meaningful behavioral patterns and generate testable hypotheses. "
+        "Focus on patterns that are actionable — things that can improve the user's "
+        "daily planning and intervention strategy."
+    ),
+    backstory=(
+        "You are a behavioral data scientist specializing in ADHD executive function "
+        "patterns. You look for correlations between brain states, task completion, "
+        "mood, intervention triggers, and time-of-day effects. Your hypotheses must "
+        "be specific, testable, and backed by evidence from the user's actual data."
+    ),
+    tools=[get_user_history, save_hypothesis_card],
+    llm=_llm,
+    allow_delegation=False,
+    max_iter=10,
+    verbose=False,
+)
+
+def run_pattern_detection(user_id: str) -> dict:
+    """Analyze user history and generate hypothesis cards."""
+    task = Task(
+        description=f"""
+        Analyze the behavioral data for user {user_id}.
+
+        STEP 1: Fetch user history using the get_user_history tool.
+        STEP 2: Look for these pattern types:
+          - Energy patterns: Do low-energy days follow high-output days?
+          - Time-of-day effects: When is the user most productive?
+          - Task type preferences: Which categories have highest completion?
+          - Intervention triggers: What conditions precede getting stuck?
+          - Mood correlations: What predicts good vs bad mood days?
+          - Brain state accuracy: Does self-reported brain state match outcomes?
+        STEP 3: Generate 1-3 hypothesis cards. Each card must have:
+          - patternDetected: Specific pattern description
+          - prediction: Testable prediction for future behavior
+          - confidence: "low" | "medium" | "high" (based on evidence strength)
+          - supportingEvidence: Array of {{day: number, detail: string}}
+          - status: "testing" (new) | "confirmed" | "rejected"
+        STEP 4: Save each hypothesis card using the save_hypothesis_card tool.
+        STEP 5: Return JSON array of all generated cards.
+
+        IMPORTANT: Only generate hypotheses backed by real data patterns.
+        Do NOT make up patterns. If insufficient data (<7 days), return empty array.
+        """,
+        expected_output="JSON array of hypothesis cards",
+        agent=pattern_agent,
+    )
+
+    crew = Crew(
+        agents=[pattern_agent],
+        tasks=[task],
+        process=Process.sequential,
+        memory=True,
+        verbose=False,
+    )
+
+    result = crew.kickoff()
+    return _parse_result(result)
+```
+
+Add `save_hypothesis_card` tool to `db_tools.py`:
+
+```python
+@tool
+def save_hypothesis_card(user_id: str, card_json: str) -> str:
+    """Save a hypothesis card to the database."""
+    db = get_supabase_admin()
+    card = json.loads(card_json)
+
+    result = db.table("hypothesis_cards").insert({
+        "user_id": user_id,
+        "pattern_detected": card["patternDetected"],
+        "prediction": card["prediction"],
+        "confidence": card["confidence"],
+        "supporting_evidence": card.get("supportingEvidence", []),
+        "status": card.get("status", "testing"),
+    }).execute()
+
+    return json.dumps({"cardId": result.data[0]["id"]})
+```
+
+Update `dashboard.py` to trigger pattern detection when fetching dashboard (or on a schedule):
+
+```python
+@router.get("/{user_id}")
+async def get_dashboard(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    # ... existing trend data fetching ...
+
+    # Check if hypothesis cards need refreshing (older than 24h or none exist)
+    cards = db.table("hypothesis_cards").select("*").eq("user_id", user_id).execute().data
+
+    if should_refresh_hypotheses(cards):
+        # Run pattern detection in background (don't block dashboard response)
+        import asyncio
+        asyncio.create_task(asyncio.to_thread(run_pattern_detection, user_id))
+
+    # Return existing cards (new ones appear on next dashboard load)
+    # ... rest unchanged ...
+```
+
+### Task 4C-4: Feedback Loop After Interventions
+
+**Person A (frontend) + Person B (backend)**
+
+**Backend** — Add columns to interventions table:
+
+```sql
+-- Phase 4C migration: Add feedback columns
+ALTER TABLE interventions ADD COLUMN IF NOT EXISTS user_rating integer CHECK (user_rating BETWEEN 1 AND 5);
+ALTER TABLE interventions ADD COLUMN IF NOT EXISTS user_feedback text;
+ALTER TABLE interventions ADD COLUMN IF NOT EXISTS feedback_at timestamptz;
+```
+
+Create `backend/app/routes/feedback.py`:
+
+```python
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from app.middleware.auth import get_current_user
+from app.database import get_supabase_admin
+
+router = APIRouter(prefix="/api/feedback", tags=["feedback"])
+
+class FeedbackRequest(BaseModel):
+    interventionId: str
+    rating: int  # 1-5
+    feedback: str | None = None
+
+@router.post("/intervention")
+async def submit_intervention_feedback(
+    request: FeedbackRequest,
+    user_id: str = Depends(get_current_user),
+):
+    db = get_supabase_admin()
+    db.table("interventions").update({
+        "user_rating": request.rating,
+        "user_feedback": request.feedback,
+        "feedback_at": "now()",
+    }).eq("id", request.interventionId).eq("user_id", user_id).execute()
+
+    return {"status": "saved"}
+```
+
+**Frontend** — Update `InterventionPanel.tsx`:
+
+After the "Got it, let's go" button, add a feedback section:
+
+```tsx
+{showFeedback && (
+  <div className="mt-4 border-t border-border pt-4">
+    <p className="text-sm text-muted-foreground">Was this intervention helpful?</p>
+    <div className="flex gap-2 mt-2">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          onClick={() => setRating(star)}
+          className={`text-2xl ${rating >= star ? "text-warning" : "text-faint-foreground"}`}
+        >
+          ★
+        </button>
+      ))}
+    </div>
+    <textarea
+      placeholder="What would you change? (optional)"
+      value={feedbackText}
+      onChange={(e) => setFeedbackText(e.target.value)}
+      className="mt-2 w-full rounded-lg border border-border bg-background p-3 text-sm"
+    />
+    <Button variant="secondary" size="sm" onClick={submitFeedback} className="mt-2">
+      Send Feedback
+    </Button>
+  </div>
+)}
+```
+
+Update the intervention agent to reference past feedback:
+
+```python
+# In intervention_agent.py task description, add:
+"""
+STEP 0 (before acknowledgment): Check user's past intervention feedback.
+If they rated previous interventions low and gave feedback like "too many tasks",
+adjust your restructuring strategy accordingly.
+"""
+```
+
+### Task 4C Gate
+
+Both verify:
+- [ ] Planning agent rationale references user history ("based on your past 3 plans...")
+- [ ] Pattern agent generates real hypothesis cards from 14-day data (not pre-seeded)
+- [ ] Hypothesis cards appear on dashboard after pattern detection runs
+- [ ] Intervention feedback (stars + text) saves to database
+- [ ] Intervention agent adapts based on past feedback
+- [ ] Memory persists between sessions (plan a task, close browser, reopen — agent references prior plan)
+
+---
+
+## Phase 4D — Agent Orchestration Enhancement
+
+> **Advanced CrewAI features.** Depends on 4A + 4C completion.
+
+### Task 4D-1: Create Orchestrator Manager Agent
+
+**Person B** — Create NEW file `backend/app/agents/orchestrator.py`
+
+```python
+from crewai import Agent, Task, Crew, Process, LLM
+from app.agents.screening_agent import screening_agent, create_screening_task
+from app.agents.planning_agent import planning_agent, create_planning_task
+from app.agents.intervention_agent import intervention_agent, create_intervention_task
+from app.agents.tools.db_tools import get_cognitive_profile, get_user_history
+
+_llm = LLM(model="anthropic/claude-sonnet-4-20250514")
+
+manager_agent = Agent(
+    role="Attune Executive Function Manager",
+    goal=(
+        "Coordinate screening, planning, and intervention agents to provide "
+        "comprehensive executive function support. Analyze user state — profile "
+        "completeness, recent history, current brain state, intervention patterns — "
+        "and delegate to the right specialist with the right context."
+    ),
+    backstory=(
+        "You are an expert coordinator who understands ADHD executive function challenges "
+        "holistically. You don't do the specialized work yourself — you ensure each "
+        "specialist agent receives optimal context and instructions. You understand when "
+        "a user needs re-screening (profile is stale), when a plan needs intervention "
+        "history context, and when to proactively suggest changes."
+    ),
+    tools=[get_cognitive_profile, get_user_history],
+    llm=_llm,
+    allow_delegation=True,
+    max_iter=10,
+    verbose=False,
+)
+
+def run_orchestrated_planning(user_id: str, brain_state: str, tasks: list = None) -> dict:
+    """
+    Enhanced planning flow: manager analyzes context → delegates to planning agent.
+    Falls back to direct planning if orchestration fails.
+    """
+    manager_task = Task(
+        description=f"""
+        Coordinate plan generation for user {user_id} with brain state: {brain_state}.
+
+        1. Fetch user's cognitive profile and recent history.
+        2. Analyze: How many days of data? Recent interventions? Completion trends?
+        3. Provide context summary to the Planning Strategist agent.
+        4. Delegate plan generation with enhanced context.
+        5. Review the generated plan for quality:
+           - Does every task have a profile-referenced rationale?
+           - Are durations appropriate for the brain state?
+           - Does it account for recent intervention patterns?
+        6. Return the final plan.
+        """,
+        expected_output="Complete daily plan with tasks and rationale",
+        agent=manager_agent,
+    )
+
+    planning_task = create_planning_task(user_id, brain_state, tasks)
+
+    crew = Crew(
+        agents=[manager_agent, planning_agent],
+        tasks=[manager_task, planning_task],
+        process=Process.hierarchical,
+        manager_agent=manager_agent,
+        memory=True,
+        verbose=False,
+    )
+
+    result = crew.kickoff()
+    return _parse_result(result)
+```
+
+Update `routes/plan.py` to use orchestrated flow:
+
+```python
+@router.post("/generate")
+async def generate_plan(
+    request: PlanRequest,
+    user_id: str = Depends(get_current_user),
+):
+    try:
+        # Try orchestrated flow first
+        result = await asyncio.to_thread(
+            run_orchestrated_planning, user_id, request.brainState, request.tasks
+        )
+    except Exception:
+        # Fall back to direct planning agent
+        result = await asyncio.to_thread(
+            run_planning, user_id, request.brainState, request.tasks
+        )
+
+    return PlanResponse(**result)
+```
+
+### Task 4D-2: Add ADHD Knowledge Base
+
+**Person B** — Create `backend/knowledge/` directory with 3 files.
+
+`backend/knowledge/executive_function_strategies.md`:
+```markdown
+# Executive Function Strategies for ADHD
+
+## Task Initiation
+- "2-Minute Start" rule: commit to only 2 minutes, momentum often carries further
+- Environmental manipulation: set up workspace BEFORE the task block
+- Body doubling: presence of another person reduces initiation friction by ~40%
+- Momentum starters: 5-min easy task immediately before the hard one
+
+## Time Management
+- Time blocking with buffer: 15-min gaps between focused blocks
+- External timers visible in workspace (not phone-based)
+- "Foggy day" schedule: max 4 tasks, 20-min blocks, start with easiest
+- "Focused day" schedule: deep work in peak attention window (usually morning)
+- "Wired day" schedule: channel energy into physical + creative tasks, 15-min blocks
+
+## Emotional Regulation
+- Acknowledge before action: name the feeling, normalize as brain-based
+- Task-emotion mismatch: if emotional intensity is high, switch to kinesthetic tasks
+- Shame interruption: "This is task initiation friction, not a character flaw"
+
+## Working Memory Support
+- Externalize everything: written plan = external working memory
+- Single-task focus: close all unrelated tabs/apps during focused blocks
+- Checkpoint system: mini-review every 30 minutes
+```
+
+`backend/knowledge/intervention_playbook.md`:
+```markdown
+# Intervention Playbook — When Users Get Stuck
+
+## Clinical Sequence (MUST follow this order)
+1. ACKNOWLEDGE: Name the specific feeling/experience (1-2 sentences)
+2. NORMALIZE: Frame as brain-based, not character-based
+3. RESTRUCTURE: Modify the plan to reduce friction
+
+## Restructure Strategies by Stuck Type
+
+### "I can't start" (Task Initiation)
+- Break into 3 micro-steps: (1) set up, (2) do 5 min, (3) continue or stop
+- Add momentum starter (5-min easy task) before the hard one
+- Reduce first task to 10 minutes max
+
+### "I can't focus" (Attention Regulation)
+- Switch to a different category task (variety resets attention)
+- Add a 5-min physical movement break
+- Shorten remaining blocks to 15 minutes
+
+### "I'm overwhelmed" (Working Memory Overload)
+- Reduce total remaining tasks by 30-50%
+- Remove lowest-priority tasks entirely
+- Add explicit "wrap-up" task at the end
+
+### "Too many things in my head" (Wired/Hyperstimulated)
+- Add 2 physical movement breaks
+- Front-load the most stimulating tasks
+- End with a calming creative or review task
+
+## Acknowledgment Examples (DO use)
+- "That friction you're feeling when you try to start? That's your brain's initiation system — it's not laziness."
+- "Racing between tasks without finishing any is what a wired brain does. Let's channel that energy."
+- "Forgetting what you were working on after a brief interruption — that's working memory, not carelessness."
+
+## Acknowledgment Anti-Patterns (DO NOT use)
+- "I understand how you feel" (generic, dismissive)
+- "Just try harder" (invalidating)
+- "You should..." (prescriptive before acknowledgment)
+- "Everyone gets stuck sometimes" (minimizing)
+```
+
+`backend/knowledge/brain_state_research.md`:
+```markdown
+# Brain State Research — Cognitive Performance by State
+
+## Foggy State 
+- Characterized by: slow processing, difficulty initiating, low motivation
+- Optimal task types: routine, admin, review (low cognitive load)
+- Duration limit: 20 minutes per block before break
+- Recovery strategy: physical movement, bright light, hydration
+- Planning rule: start with easiest task, build momentum gradually
+
+## Focused State
+- Characterized by: clear thinking, sustained attention, good working memory
+- Optimal task types: deep work, complex problem-solving, learning
+- Duration capacity: 45-60 minute blocks
+- Protection strategy: minimize interruptions, batch communications
+- Planning rule: schedule hardest/most important task in this window
+
+## Wired State 
+- Characterized by: restlessness, rapid task-switching, difficulty sitting still
+- Optimal task types: physical tasks, short creative bursts, social interactions
+- Duration limit: 15 minutes per block (attention shifts rapidly)
+- Channeling strategy: use the energy productively, don't fight it
+- Planning rule: more tasks with shorter durations, include 2+ movement breaks
+
+## State Transitions
+- Foggy → Focused: 30-60 min after wake + caffeine + movement
+- Focused → Wired: often triggered by stimulating content or deadline pressure
+- Wired → Foggy: energy crash after 2-3 hours of high output
+- Pattern: post-lunch dip is universal — schedule easy tasks 1-2pm
+```
+
+Integrate knowledge into agents:
+
+```python
+from crewai.knowledge import Knowledge
+from crewai.knowledge.source.text_file_knowledge_source import TextFileKnowledgeSource
+
+adhd_knowledge = Knowledge(
+    collection_name="attune_adhd",
+    sources=[
+        TextFileKnowledgeSource(file_path="./knowledge/executive_function_strategies.md"),
+        TextFileKnowledgeSource(file_path="./knowledge/intervention_playbook.md"),
+        TextFileKnowledgeSource(file_path="./knowledge/brain_state_research.md"),
+    ],
+)
+
+# In planning_agent.py:
+planning_agent = Agent(
+    role="Executive Function Planning Strategist",
+    knowledge=adhd_knowledge,  # ← Agent can now cite research
+    # ... rest unchanged
+)
+
+# In intervention_agent.py:
+intervention_agent = Agent(
+    role="ADHD Crisis Response Specialist",
+    knowledge=adhd_knowledge,  # ← Agent follows intervention playbook
+    # ... rest unchanged
+)
+```
+
+### Task 4D-3: Structured Output (Replace JSON Parsing)
+
+**Person B** — Replace fragile `raw.find("{")` parsing with Pydantic models.
+
+Define output models in `backend/app/models.py`:
+
+```python
+# Add these Pydantic models for CrewAI structured output:
+class ScreeningOutput(BaseModel):
+    dimensions: list[RadarDimension]
+    profileTags: list[str]
+    summary: str
+    asrsTotalScore: int
+    isPositiveScreen: bool
+    profileId: str
+
+class PlanOutput(BaseModel):
+    planId: str
+    tasks: list[Task]
+    overallRationale: str
+
+class InterventionOutput(BaseModel):
+    interventionId: str
+    acknowledgment: str
+    restructuredTasks: list[Task]
+    agentReasoning: str
+    followupHint: str | None = None
+```
+
+Update each agent's Task to use `output_pydantic`:
+
+```python
+# In planning_agent.py:
+planning_task = Task(
+    description="...",
+    expected_output="JSON plan with tasks and rationale",
+    output_pydantic=PlanOutput,  # ← CrewAI validates output against this model
+    agent=planning_agent,
+)
+```
+
+Remove manual JSON parsing from route handlers:
+
+```python
+# BEFORE (fragile):
+raw = str(result.raw)
+start = raw.find("{")
+end = raw.rfind("}") + 1
+parsed = json.loads(raw[start:end])
+
+# AFTER (structured):
+result = crew.kickoff()
+return result.pydantic  # ← Already validated Pydantic model
+```
+
+### Task 4D-4: Event Streaming via WebSocket
+
+**Person B (backend) + Person A (frontend)**
+
+**Backend** — Create NEW file `backend/app/routes/websocket.py`:
+
+```python
+from fastapi import WebSocket, WebSocketDisconnect
+from crewai.utilities.events import crewai_event_bus
+from crewai.utilities.events.base_events import (
+    AgentExecutionStartedEvent,
+    AgentExecutionCompletedEvent,
+    TaskStartedEvent,
+    TaskCompletedEvent,
+)
+import asyncio
+import json
+
+# Progress message mapping
+PROGRESS_MESSAGES = {
+    "Executive Function Planning Strategist": {
+        "start": "Analyzing your cognitive profile...",
+        "tools": "Checking your history and patterns...",
+        "thinking": "Crafting your personalized plan...",
+        "complete": "Plan ready!",
+    },
+    "ADHD Crisis Response Specialist": {
+        "start": "Attune is listening...",
+        "tools": "Understanding your situation...",
+        "thinking": "Restructuring your plan...",
+        "complete": "New plan ready!",
+    },
+}
+
+@app.websocket("/ws/agent-progress/{user_id}")
+async def agent_progress(websocket: WebSocket, user_id: str):
+    await websocket.accept()
+
+    queue = asyncio.Queue()
+
+    def on_event(event):
+        if isinstance(event, AgentExecutionStartedEvent):
+            role = event.agent.role if hasattr(event, 'agent') else "Agent"
+            messages = PROGRESS_MESSAGES.get(role, {})
+            asyncio.create_task(queue.put({
+                "type": "agent_started",
+                "message": messages.get("start", f"{role} is working..."),
+            }))
+        elif isinstance(event, TaskCompletedEvent):
+            asyncio.create_task(queue.put({
+                "type": "task_completed",
+                "message": "Processing complete",
+            }))
+
+    # Subscribe to CrewAI events
+    crewai_event_bus.on("*", on_event)
+
+    try:
+        while True:
+            message = await asyncio.wait_for(queue.get(), timeout=60)
+            await websocket.send_json(message)
+    except (WebSocketDisconnect, asyncio.TimeoutError):
+        pass
+    finally:
+        crewai_event_bus.off("*", on_event)
+```
+
+**Frontend** — Update `frontend/src/hooks/useDailyPlan.ts`:
+
+```ts
+const [progressMessage, setProgressMessage] = useState<string | null>(null);
+
+const generateDailyPlan = useCallback(async () => {
+  setIsGenerating(true);
+  setProgressMessage("Connecting to AI agents...");
+
+  // Open WebSocket for progress updates
+  const ws = new WebSocket(
+    `${process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000"}/ws/agent-progress/${user.id}`
+  );
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    setProgressMessage(data.message);
+  };
+
+  try {
+    const result = await generatePlan(user.id, brainState!, userTasks);
+    setPlan(result);
+  } finally {
+    ws.close();
+    setIsGenerating(false);
+    setProgressMessage(null);
+  }
+}, [user, brainState]);
+```
+
+In the plan page, replace static spinner with progress:
+
+```tsx
+{isGenerating && (
+  <LoadingSpinner size={32} label={progressMessage || "AI agents are crafting your plan..."} />
+)}
+```
+
+### Task 4D-5: Production Agent Configuration
+
+**Person B** — Update all agent files.
+
+```python
+# Add to all Agent() constructors:
+agent = Agent(
+    role="...",
+    max_rpm=20,        # Max 20 requests/minute to Claude API
+    max_iter=10,       # Max 10 reasoning iterations per task
+    verbose=False,     # No debug output in production
+    # ... rest unchanged
+)
+```
+
+Add retry logic to route handlers:
+
+```python
+import time
+
+MAX_RETRIES = 3
+
+async def run_with_retry(fn, *args):
+    """Run agent function with exponential backoff retry."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            return await asyncio.to_thread(fn, *args)
+        except Exception as e:
+            if attempt == MAX_RETRIES - 1:
+                raise
+            wait = 2 ** attempt  # 1s, 2s, 4s
+            await asyncio.sleep(wait)
+
+# Usage in routes:
+@router.post("/generate")
+async def generate_plan(request: PlanRequest, user_id: str = Depends(get_current_user)):
+    result = await run_with_retry(run_orchestrated_planning, user_id, request.brainState)
+    return PlanResponse(**result)
+```
+
+### Task 4D Gate
+
+Both verify:
+- [ ] Orchestrated planning (hierarchical) produces plans with history-aware rationale
+- [ ] Knowledge base cited in planning rationale ("Research shows...")
+- [ ] Structured output produces valid Pydantic models (no JSON parsing errors)
+- [ ] WebSocket sends progress messages during plan generation
+- [ ] Frontend shows real-time progress instead of static spinner
+- [ ] Retry logic handles transient failures (test by briefly stopping Claude API)
+- [ ] Direct agent routes still work as fallback
+
+---
+
+## Phase 4E — Real User Validation
+
+> **Requires 4A (auth).** Can run in parallel with 4C/4D.
+
+### Task 4E-1: Multi-User Support
+
+**Person A (frontend) + Person B (backend)**
+
+**Backend** — Update `auth.py`:
+
+```python
+@router.post("/signup")
+async def signup(request: SignupRequest):
+    """Create a new user account via Supabase Auth."""
+    db = get_supabase_anon()
+    result = db.auth.sign_up({
+        "email": request.email,
+        "password": request.password,
+        "options": {"data": {"name": request.name}},
+    })
+
+    if result.user is None:
+        raise HTTPException(status_code=400, detail="Signup failed")
+
+    return {
+        "userId": str(result.user.id),
+        "name": request.name,
+        "isGuest": False,
+        "hasProfile": False,
+        "accessToken": result.session.access_token,
+    }
+
+@router.post("/login")
+async def login(request: LoginRequest):
+    """Sign in with email + password."""
+    db = get_supabase_anon()
+    result = db.auth.sign_in_with_password({
+        "email": request.email,
+        "password": request.password,
+    })
+
+    if result.user is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Check if user has a profile
+    profile = get_supabase_admin().table("cognitive_profiles") \
+        .select("id").eq("user_id", str(result.user.id)).limit(1).execute()
+
+    return {
+        "userId": str(result.user.id),
+        "name": result.user.user_metadata.get("name", "User"),
+        "isGuest": False,
+        "hasProfile": len(profile.data) > 0,
+        "accessToken": result.session.access_token,
+    }
+```
+
+**Frontend** — Update landing page `page.tsx`:
+
+```tsx
+{/* Replace single CTA with two options */}
+<div className="flex justify-center gap-4 mt-12">
+  <Button variant="primary" size="lg" onClick={() => router.push("/signup")}>
+    Create Account
+  </Button>
+  <GuestLoginButton />  {/* Stays as "Try Demo" */}
+</div>
+```
+
+New users follow: signup → (auto-redirect to) screening → plan → dashboard.
+Guest users follow: guest login → plan (Alex has profile) or screening.
+
+### Task 4E-2: Post-Intervention Feedback Collection
+
+**Person A** — Already covered in Task 4C-4. This task adds the dashboard visualization:
+
+In `frontend/src/app/dashboard/page.tsx`, add a "Your Feedback" section:
+
+```tsx
+{/* Below hypothesis cards */}
+<Card>
+  <h3 className="font-semibold text-foreground">Your Intervention Feedback</h3>
+  <div className="mt-3 space-y-2">
+    {feedbackHistory.map((f) => (
+      <div key={f.id} className="flex items-center gap-2 text-sm">
+        <span className="text-warning">{"★".repeat(f.rating)}</span>
+        <span className="text-muted-foreground">{f.feedback || "No comment"}</span>
+        <span className="text-faint-foreground text-xs">{f.date}</span>
+      </div>
+    ))}
+  </div>
+</Card>
+```
+
+### Task 4E-3: Session Analytics
+
+**Person B** — Create NEW file `backend/app/routes/analytics.py`
+
+```sql
+-- Schema migration: analytics table
+CREATE TABLE IF NOT EXISTS analytics_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  event_type text NOT NULL,  -- 'screening_started', 'plan_generated', 'intervention_triggered', etc.
+  event_data jsonb DEFAULT '{}',
+  duration_ms integer,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX idx_analytics_user ON analytics_events(user_id);
+CREATE INDEX idx_analytics_type ON analytics_events(event_type);
+
+-- RLS
+ALTER TABLE analytics_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Own events only" ON analytics_events FOR ALL USING (auth.uid() = user_id);
+```
+
+```python
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from app.middleware.auth import get_current_user
+from app.database import get_supabase_admin
+
+router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+
+class AnalyticsEvent(BaseModel):
+    eventType: str
+    eventData: dict = {}
+    durationMs: int | None = None
+
+@router.post("/event")
+async def track_event(
+    event: AnalyticsEvent,
+    user_id: str = Depends(get_current_user),
+):
+    db = get_supabase_admin()
+    db.table("analytics_events").insert({
+        "user_id": user_id,
+        "event_type": event.eventType,
+        "event_data": event.eventData,
+        "duration_ms": event.durationMs,
+    }).execute()
+    return {"status": "tracked"}
+
+@router.get("/summary/{user_id}")
+async def get_analytics_summary(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    """Return aggregated analytics for a user."""
+    if current_user != user_id:
+        raise HTTPException(status_code=403)
+
+    db = get_supabase_admin()
+    events = db.table("analytics_events").select("*").eq("user_id", user_id).execute().data
+
+    return {
+        "totalScreenings": len([e for e in events if e["event_type"] == "screening_completed"]),
+        "totalPlans": len([e for e in events if e["event_type"] == "plan_generated"]),
+        "totalInterventions": len([e for e in events if e["event_type"] == "intervention_triggered"]),
+        "avgPlanGenerationMs": _avg([e["duration_ms"] for e in events if e["event_type"] == "plan_generated" and e["duration_ms"]]),
+        "events": events[-50],  # Last 50 events
+    }
+```
+
+### Task 4E Gate
+
+Both verify:
+- [ ] New user can sign up with email/password → redirected to screening
+- [ ] Existing user can sign in → sees their data (not Alex's)
+- [ ] Guest login still works as "Try Demo"
+- [ ] Intervention feedback shows on dashboard
+- [ ] Analytics events tracked: screening, plan generation, interventions
+- [ ] Two different users have completely separate data
+
+---
+
+## Phase 4 Full Integration Test
+
+Walk through this 5-minute test after all sub-phases:
+
+| Step | Action | Expected |
+|------|--------|----------|
+| 1 | Open localhost:3000 | Landing page with "Create Account" + "Try Demo" |
+| 2 | Click "Create Account" | Signup form → creates Supabase Auth user |
+| 3 | Redirected to /screening | No profile yet → must screen first |
+| 4 | Complete 6-question screening | Agent runs with memory + knowledge |
+| 5 | Radar chart + profile | Profile saved, agent remembers for future |
+| 6 | Navigate to /plan | Brain state selector visible |
+| 7 | Select "Focused" → Generate | WebSocket progress: "Analyzing profile..." → "Checking history..." → "Crafting plan..." |
+| 8 | Plan appears | Rationale cites cognitive profile + (empty) history |
+| 9 | Click "I'm Stuck" | Intervention agent runs with knowledge base |
+| 10 | Typewriter acknowledgment | Follows intervention playbook patterns |
+| 11 | Rate intervention (4 stars) | Feedback saved to DB |
+| 12 | Navigate to /dashboard | Momentum score, trend (1 day), no hypothesis cards yet (too few days) |
+| 13 | Open /settings | "Export" and "Delete" buttons visible |
+| 14 | Click "Export My Data" | JSON download with all user data |
+| 15 | Open new incognito window | Cannot access first user's data (RLS enforced) |
+| 16 | Click "Try Demo" (original window) | Alex loads with 14-day seeded data |
+| 17 | Dashboard shows Alex's data | 2 hypothesis cards, momentum ~71, 14-day trend |
+
+---
+
+## New Dependencies (Phase 4)
+
+**Backend** (`requirements.txt` additions):
+```
+chromadb>=0.4.0          # CrewAI long-term memory vector store
+```
+
+**Frontend** (`package.json` additions):
+```
+@supabase/supabase-js    # Supabase Auth client
+```
+
+---
+
+## Updated API Contracts (Phase 4)
+
+```
+POST /api/auth/guest
+  Request:  {} (empty)
+  Response: { userId, name, isGuest, hasProfile, accessToken }
+  Header:   None (public endpoint)
+
+POST /api/auth/signup
+  Request:  { email, password, name }
+  Response: { userId, name, isGuest: false, hasProfile: false, accessToken }
+
+POST /api/auth/login
+  Request:  { email, password }
+  Response: { userId, name, isGuest, hasProfile, accessToken }
+
+POST /api/auth/logout
+  Header:   Authorization: Bearer <token>
+  Response: { status: "logged_out" }
+
+DELETE /api/user/{userId}
+  Header:   Authorization: Bearer <token>
+  Response: { status: "deleted", userId }
+
+GET /api/user/{userId}/export
+  Header:   Authorization: Bearer <token>
+  Response: { exportDate, userId, user, screeningAnswers, cognitiveProfiles, ... }
+
+POST /api/feedback/intervention
+  Header:   Authorization: Bearer <token>
+  Request:  { interventionId, rating (1-5), feedback? }
+  Response: { status: "saved" }
+
+POST /api/analytics/event
+  Header:   Authorization: Bearer <token>
+  Request:  { eventType, eventData?, durationMs? }
+  Response: { status: "tracked" }
+
+WS /ws/agent-progress/{userId}
+  Messages: { type: "agent_started"|"task_completed", message: string }
+
+All existing endpoints (screening/evaluate, profile/{id}, plan/generate, plan/intervene, dashboard/{id})
+  NOW REQUIRE: Authorization: Bearer <token> header
+  userId is extracted from JWT, not from request body
 ```

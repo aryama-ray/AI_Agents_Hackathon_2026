@@ -5,6 +5,7 @@ import { useUser } from "@/hooks/useUser";
 import { ASRS_QUESTIONS, ANSWER_OPTIONS, type Question } from "@/lib/screeningData";
 import { saveScreeningRecord } from "@/lib/screeningStore";
 import api from "@/lib/api";
+import { trackAnalyticsEvent } from "@/lib/api";
 
 export type Phase = "idle" | "questioning" | "evaluating" | "complete";
 
@@ -90,6 +91,7 @@ export function useScreeningChat(): UseScreeningChatReturn {
     setResult(null);
     setPhase("questioning");
     submittingRef.current = false;
+    trackAnalyticsEvent("screening_started");
   }
 
   const submitAnswer = useCallback(
@@ -121,11 +123,11 @@ export function useScreeningChat(): UseScreeningChatReturn {
         }
 
         setPhase("evaluating");
+        const evalStart = Date.now();
 
         let evalResult: ScreeningResult;
         try {
-          const res = await api.post<ScreeningResult>("/screening/evaluate", {
-            userId: user?.id ?? "guest",
+          const res = await api.post<ScreeningResult>("/api/screening/evaluate", {
             answers: newAnswers,
           });
           evalResult = res.data;
@@ -133,6 +135,12 @@ export function useScreeningChat(): UseScreeningChatReturn {
           // Backend not available — compute client-side
           evalResult = computeLocally(newAnswers);
         }
+
+        trackAnalyticsEvent(
+          "screening_completed",
+          { tagCount: evalResult.tags.length },
+          Date.now() - evalStart,
+        );
 
         setResult(evalResult);
 

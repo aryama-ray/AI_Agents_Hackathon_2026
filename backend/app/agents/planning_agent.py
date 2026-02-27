@@ -1,8 +1,22 @@
 import json
+import logging
 from crewai import Agent, Task, Crew, Process, LLM
-from app.agents.tools.db_tools import get_cognitive_profile, save_daily_plan
+from crewai.knowledge.source.text_file_knowledge_source import TextFileKnowledgeSource
+from app.agents.tools.db_tools import get_cognitive_profile, save_daily_plan, get_user_history
+from app.models import PlanOutput
+
+logger = logging.getLogger(__name__)
 
 _llm = LLM(model="anthropic/claude-sonnet-4-20250514")
+
+# Knowledge base: pass Path objects so CrewAI uses them as-is (strings get prefixed with "knowledge/")
+from pathlib import Path as _Path
+_knowledge_dir = _Path(__file__).resolve().parent.parent.parent / "knowledge"
+_knowledge_sources = []
+for _fname in ["executive_function_strategies.md", "brain_state_research.md"]:
+    _fpath = _knowledge_dir / _fname
+    if _fpath.exists():
+        _knowledge_sources.append(TextFileKnowledgeSource(file_paths=[_fpath]))
 
 
 BRAIN_STATE_STRATEGIES = {
@@ -48,11 +62,17 @@ planning_agent = Agent(
         "- 'Scheduled first — your Attention Regulation score suggests peak focus in the "
         "first 90 minutes. This task needs sustained attention, so it gets your best window.'\n"
         "- 'Shortened to 15 minutes — on Foggy days, your Working Memory needs smaller "
-        "chunks. You can always extend if momentum builds.'"
+        "chunks. You can always extend if momentum builds.'\n\n"
+        "You have access to an ADHD research knowledge base with executive function "
+        "strategies and brain state research. Cite research insights in your rationale "
+        "when relevant (e.g. 'Research shows foggy-day blocks should be max 20 minutes')."
     ),
-    tools=[get_cognitive_profile, save_daily_plan],
+    tools=[get_cognitive_profile, save_daily_plan, get_user_history],
+    knowledge_sources=_knowledge_sources if _knowledge_sources else None,
     llm=_llm,
-    verbose=True,
+    max_rpm=20,
+    max_iter=10,
+    verbose=False,
 )
 
 
@@ -70,9 +90,18 @@ def create_planning_task(user_id: str, brain_state: str, user_tasks: list[str] |
             f"{task_context}\n"
             f"Step 1: Use get_cognitive_profile tool with user_id={user_id} to fetch "
             "the user's cognitive profile.\n"
-            "Step 2: Generate tasks following the brain state strategy, ensuring each task "
-            "has a rationale referencing the user's specific cognitive dimensions.\n"
-            f"Step 3: Use save_daily_plan tool to save the plan with user_id={user_id}.\n\n"
+            f"Step 2: Use get_user_history tool with user_id={user_id} to fetch recent "
+            "checkins and past interventions. Analyze patterns:\n"
+            "  - Which task categories had highest completion rates?\n"
+            "  - What time slots worked best for deep work?\n"
+            "  - Were there recent interventions? What was the stuck pattern?\n"
+            "  - What brain states correlated with best outcomes?\n"
+            "Step 3: Generate tasks following the brain state strategy. Use history to justify "
+            "task placement. Each task rationale should reference cognitive dimensions AND "
+            "historical patterns when available (e.g. 'Based on your history, you complete "
+            "creative tasks best in the morning', 'Your last 3 focused-state plans averaged "
+            "80% completion with 45-min blocks').\n"
+            f"Step 4: Use save_daily_plan tool to save the plan with user_id={user_id}.\n\n"
             "Each task must include: index, title, description, duration_minutes, time_slot "
             "(e.g. '9:00 AM'), category (deep_work|admin|creative|physical|social), "
             "rationale (referencing cognitive profile), priority (high|medium|low), "
@@ -90,6 +119,7 @@ def create_planning_task(user_id: str, brain_state: str, user_tasks: list[str] |
             "A JSON object containing planId, tasks (array of task objects with rationale), "
             "and overallRationale explaining the overall strategy."
         ),
+        output_pydantic=PlanOutput,
         agent=planning_agent,
     )
 
@@ -100,9 +130,17 @@ def run_planning(user_id: str, brain_state: str, user_tasks: list[str] | None = 
         agents=[planning_agent],
         tasks=[task],
         process=Process.sequential,
-        verbose=True,
+        memory=True,
+        verbose=False,
     )
     result = crew.kickoff()
+
+    # Try structured output first (Pydantic model)
+    if hasattr(result, "pydantic") and result.pydantic is not None:
+        return result.pydantic.model_dump()
+
+    # Fallback to raw JSON parsing
+    logger.warning("Structured output unavailable, falling back to raw JSON parsing")
     raw = str(result.raw) if hasattr(result, "raw") else str(result)
     try:
         start = raw.find("{")

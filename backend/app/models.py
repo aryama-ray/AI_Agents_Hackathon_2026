@@ -8,6 +8,26 @@ class GuestLoginResponse(BaseModel):
     name: str
     isGuest: bool
     hasProfile: bool
+    accessToken: Optional[str] = None
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    userId: str
+    name: str
+    isGuest: bool
+    hasProfile: bool
+    accessToken: str
 
 
 # ── ASRS Screening ──
@@ -18,7 +38,6 @@ class ASRSAnswer(BaseModel):
 
 
 class ScreeningRequest(BaseModel):
-    userId: str
     answers: list[ASRSAnswer]
 
 
@@ -59,7 +78,6 @@ class Task(BaseModel):
 
 
 class PlanRequest(BaseModel):
-    userId: str
     brainState: str
     tasks: Optional[list[str]] = None
 
@@ -72,7 +90,6 @@ class PlanResponse(BaseModel):
 
 # ── Intervention ──
 class InterventionRequest(BaseModel):
-    userId: str
     planId: str
     stuckTaskIndex: int
     userMessage: Optional[str] = None
@@ -113,9 +130,46 @@ class AgentAnnotation(BaseModel):
     type: str
 
 
+class FeedbackItem(BaseModel):
+    id: str
+    rating: int
+    feedback: Optional[str] = None
+    date: str
+
+
 class DashboardResponse(BaseModel):
     trendData: list[TrendDataPoint]
     momentumScore: int
     momentumDelta: int
     hypothesisCards: list[HypothesisCard]
     agentAnnotations: list[AgentAnnotation]
+    feedbackHistory: list[FeedbackItem] = []
+
+
+# ── CrewAI Structured Output Models ──
+# These are used with output_pydantic in CrewAI tasks to replace fragile JSON parsing.
+
+class ScreeningOutput(BaseModel):
+    """Structured output from the screening agent."""
+    dimensions: list[RadarDimension]
+    profileTags: list[str]
+    summary: str
+    asrsTotalScore: int
+    isPositiveScreen: bool
+    profileId: str
+
+
+class PlanOutput(BaseModel):
+    """Structured output from the planning agent."""
+    planId: str
+    tasks: list[Task]
+    overallRationale: str
+
+
+class InterventionOutput(BaseModel):
+    """Structured output from the intervention agent."""
+    interventionId: str
+    acknowledgment: str
+    restructuredTasks: list[Task]
+    agentReasoning: str
+    followupHint: Optional[str] = None

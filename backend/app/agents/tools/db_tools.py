@@ -1,6 +1,6 @@
 import json
 from crewai.tools import tool
-from app.database import get_supabase
+from app.database import get_supabase_admin
 
 
 @tool
@@ -9,7 +9,7 @@ def save_profile_to_db(user_id: str, profile_json: str) -> str:
     Input: user_id and profile_json containing dimensions, profileTags, summary,
     asrsTotalScore, isPositiveScreen.
     Returns: the saved profile id."""
-    db = get_supabase()
+    db = get_supabase_admin()
     profile = json.loads(profile_json)
     result = db.table("cognitive_profiles").insert({
         "user_id": user_id,
@@ -26,7 +26,7 @@ def save_profile_to_db(user_id: str, profile_json: str) -> str:
 def get_cognitive_profile(user_id: str) -> str:
     """Fetch the most recent cognitive profile for a user from the database.
     Returns: JSON with dimensions, profileTags, summary, or empty if none exists."""
-    db = get_supabase()
+    db = get_supabase_admin()
     result = (
         db.table("cognitive_profiles")
         .select("*")
@@ -52,7 +52,7 @@ def save_daily_plan(user_id: str, plan_json: str) -> str:
     """Save a generated daily plan to the database.
     Input: user_id and plan_json containing brainState, tasks, overallRationale.
     Returns: the saved plan id."""
-    db = get_supabase()
+    db = get_supabase_admin()
     plan = json.loads(plan_json)
     result = db.table("daily_plans").insert({
         "user_id": user_id,
@@ -67,7 +67,7 @@ def save_daily_plan(user_id: str, plan_json: str) -> str:
 def get_current_plan(user_id: str) -> str:
     """Fetch the most recent active daily plan for a user.
     Returns: JSON with plan id, brainState, tasks, overallRationale."""
-    db = get_supabase()
+    db = get_supabase_admin()
     result = (
         db.table("daily_plans")
         .select("*")
@@ -94,7 +94,7 @@ def save_intervention(user_id: str, intervention_json: str) -> str:
     Input: user_id and intervention_json with planId, triggerType, stuckTaskIndex,
     userMessage, emotionalAcknowledgment, originalTasks, restructuredTasks, agentReasoning.
     Returns: the saved intervention id."""
-    db = get_supabase()
+    db = get_supabase_admin()
     data = json.loads(intervention_json)
     result = db.table("interventions").insert({
         "user_id": user_id,
@@ -111,10 +111,29 @@ def save_intervention(user_id: str, intervention_json: str) -> str:
 
 
 @tool
+def save_hypothesis_card(user_id: str, card_json: str) -> str:
+    """Save a hypothesis card (behavioral pattern) to the database.
+    Input: user_id and card_json containing patternDetected, prediction,
+    confidence (low|medium|high), supportingEvidence (array), status (testing|confirmed|rejected).
+    Returns: the saved card id."""
+    db = get_supabase_admin()
+    card = json.loads(card_json)
+    result = db.table("hypothesis_cards").insert({
+        "user_id": user_id,
+        "pattern_detected": card["patternDetected"],
+        "prediction": card["prediction"],
+        "confidence": card.get("confidence", "medium"),
+        "supporting_evidence": card.get("supportingEvidence", []),
+        "status": card.get("status", "testing"),
+    }).execute()
+    return json.dumps({"cardId": result.data[0]["id"]})
+
+
+@tool
 def get_user_history(user_id: str) -> str:
     """Fetch a user's recent checkin history and past interventions for context.
     Returns: JSON with recent checkins and interventions."""
-    db = get_supabase()
+    db = get_supabase_admin()
     checkins = (
         db.table("checkins")
         .select("*")

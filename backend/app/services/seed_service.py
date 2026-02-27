@@ -1,25 +1,29 @@
 from datetime import datetime, timedelta
-from app.database import get_supabase
+from app.database import get_supabase_admin
 
 ALEX_UUID = "00000000-0000-0000-0000-000000000001"
 
 
-def seed_alex_data():
-    """Seed 14 days of demo data for the guest user Alex.
+def seed_demo_data(user_id: str = ALEX_UUID):
+    """Seed 14 days of demo data for a guest user.
 
-    This function is idempotent: it deletes all existing Alex data
-    before re-inserting, so it can be called multiple times safely.
+    This function is idempotent: it deletes all existing data for the
+    given user_id before re-inserting, so it can be called multiple times safely.
+
+    Args:
+        user_id: The UUID of the user to seed data for. Defaults to ALEX_UUID
+                 for backward compatibility with curl testing.
     """
-    db = get_supabase()
+    db = get_supabase_admin()
     today = datetime.utcnow().date()
 
-    # ── Clean up existing Alex data (order matters for FK constraints) ──
-    db.table("interventions").delete().eq("user_id", ALEX_UUID).execute()
-    db.table("hypothesis_cards").delete().eq("user_id", ALEX_UUID).execute()
-    db.table("daily_plans").delete().eq("user_id", ALEX_UUID).execute()
-    db.table("checkins").delete().eq("user_id", ALEX_UUID).execute()
-    db.table("asrs_responses").delete().eq("user_id", ALEX_UUID).execute()
-    db.table("cognitive_profiles").delete().eq("user_id", ALEX_UUID).execute()
+    # ── Clean up existing data for this user (order matters for FK constraints) ──
+    db.table("interventions").delete().eq("user_id", user_id).execute()
+    db.table("hypothesis_cards").delete().eq("user_id", user_id).execute()
+    db.table("daily_plans").delete().eq("user_id", user_id).execute()
+    db.table("checkins").delete().eq("user_id", user_id).execute()
+    db.table("asrs_responses").delete().eq("user_id", user_id).execute()
+    db.table("cognitive_profiles").delete().eq("user_id", user_id).execute()
 
     # ── 1. Cognitive Profile ──
     dimensions = [
@@ -45,7 +49,7 @@ def seed_alex_data():
     )
 
     db.table("cognitive_profiles").insert({
-        "user_id": ALEX_UUID,
+        "user_id": user_id,
         "dimensions": dimensions,
         "profile_tags": profile_tags,
         "summary": profile_summary,
@@ -65,7 +69,7 @@ def seed_alex_data():
     for i, (question, score) in enumerate(zip(asrs_questions, asrs_scores)):
         labels = ["Never", "Rarely", "Sometimes", "Often", "Very Often"]
         db.table("asrs_responses").insert({
-            "user_id": ALEX_UUID,
+            "user_id": user_id,
             "question_index": i,
             "question_text": question,
             "answer_label": labels[score],
@@ -138,7 +142,7 @@ def seed_alex_data():
 
         # Insert checkin
         checkin_result = db.table("checkins").insert({
-            "user_id": ALEX_UUID,
+            "user_id": user_id,
             "checkin_date": checkin_date,
             "mood_score": mood_scores[day_index],
             "energy_level": energy_levels[day_index],
@@ -169,7 +173,7 @@ def seed_alex_data():
 
         brain_state = energy_to_brain_state[energy_levels[day_index]]
         plan_result = db.table("daily_plans").insert({
-            "user_id": ALEX_UUID,
+            "user_id": user_id,
             "plan_date": checkin_date,
             "brain_state": brain_state,
             "tasks": plan_tasks,
@@ -279,3 +283,8 @@ def seed_alex_data():
         "annotation_day": 11,
         "agent_annotation": "Hypothesis confirmed: early quick wins boost mood by ~1.5 points. Recommending morning micro-task ritual.",
     }).execute()
+
+
+def seed_alex_data():
+    """Backward-compatible alias: seeds demo data for the hardcoded Alex UUID."""
+    seed_demo_data(ALEX_UUID)

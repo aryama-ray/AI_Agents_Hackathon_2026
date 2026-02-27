@@ -18,6 +18,7 @@ export const NAV_LINKS = [
   { href: "/screening", label: "Get Started" },
   { href: "/plan", label: "My Plan" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/settings", label: "Settings" },
 ] as const;
 
 // ─── Brain States (plan feature) ────────────────────────────────────────────

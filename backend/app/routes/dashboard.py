@@ -1,14 +1,36 @@
-from fastapi import APIRouter, HTTPException
-from app.models import DashboardResponse, TrendDataPoint, HypothesisCard, AgentAnnotation
-from app.database import get_supabase
+import asyncio
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Depends
+from app.models import DashboardResponse, TrendDataPoint, HypothesisCard, AgentAnnotation, FeedbackItem
+from app.database import get_supabase_admin
 from app.services.momentum_service import calculate_momentum
+from app.middleware.auth import get_current_user
 
 router = APIRouter()
 
+
+def _should_refresh_hypotheses(cards: list[dict]) -> bool:
+    """Check if hypothesis cards need refreshing (none exist or oldest is >24h)."""
+    if not cards:
+        return True
+    try:
+        latest = max(c["created_at"] for c in cards)
+        created = datetime.fromisoformat(str(latest).replace("Z", "+00:00"))
+        return datetime.now(timezone.utc) - created > timedelta(hours=24)
+    except (ValueError, KeyError):
+        return True
+
+
 @router.get("/{user_id}", response_model=DashboardResponse)
-async def get_dashboard(user_id: str):
+async def get_dashboard(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+):
     """Fetch dashboard data: trends, momentum, hypothesis cards, annotations."""
-    db = get_supabase()
+    if current_user != user_id:
+        raise HTTPException(status_code=403, detail="Can only access own dashboard")
+
+    db = get_supabase_admin()
 
     # Fetch checkins (last 14 days)
     checkins = (
@@ -60,6 +82,14 @@ async def get_dashboard(user_id: str):
         for h in hypothesis_rows.data
     ]
 
+    # Trigger pattern detection in background if cards need refreshing
+    if _should_refresh_hypotheses(hypothesis_rows.data) and len(checkins.data) >= 7:
+        try:
+            from app.agents.pattern_agent import run_pattern_detection
+            asyncio.create_task(asyncio.to_thread(run_pattern_detection, user_id))
+        except Exception:
+            pass  # Non-blocking — new cards appear on next dashboard load
+
     # Build agent annotations from hypothesis cards and interventions
     annotations = []
     for h in hypothesis_rows.data:
@@ -85,10 +115,23 @@ async def get_dashboard(user_id: str):
             type="intervention",
         ))
 
+    # Build feedback history from interventions with ratings
+    feedback_history = [
+        FeedbackItem(
+            id=intv["id"],
+            rating=intv["user_rating"],
+            feedback=intv.get("user_feedback"),
+            date=str(intv.get("feedback_at") or intv["created_at"]),
+        )
+        for intv in interventions.data
+        if intv.get("user_rating") is not None
+    ]
+
     return DashboardResponse(
         trendData=trend_data,
         momentumScore=momentum["score"],
         momentumDelta=momentum["delta"],
         hypothesisCards=hypothesis_cards,
         agentAnnotations=annotations,
+        feedbackHistory=feedback_history,
     )

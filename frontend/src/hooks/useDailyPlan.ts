@@ -3,7 +3,30 @@
 import { useState, useCallback } from "react";
 import { useUser } from "@/hooks/useUser";
 import api from "@/lib/api";
-import type { BrainState, BrainStateLevel, PlanResponse, PlanTask, InterventionResponse, UserTask, TaskType } from "@/types";
+import { trackAnalyticsEvent } from "@/lib/api";
+import type { BackendBrainState, BrainState, BrainStateLevel, PlanResponse, PlanTask, InterventionResponse, UserTask, TaskType } from "@/types";
+
+// ─── Map UI brain state → backend brain state ────────────────────────────────
+// Backend expects "foggy" | "focused" | "wired".
+// UI collects focusLevel / energyLevel / moodLevel each as "low" | "medium" | "high".
+//   • Low focus → "foggy"  (hard to concentrate regardless of energy)
+//   • High energy (when focus isn't low) → "wired"  (restless, needs channelling)
+//   • Otherwise → "focused"  (balanced, ready for deep work)
+
+function toBackendBrainState(bs: BrainState): BackendBrainState {
+  if (bs.focusLevel === "low") return "foggy";
+  if (bs.energyLevel === "high") return "wired";
+  return "focused";
+}
+
+// crypto.randomUUID() requires a secure context (HTTPS). Fall back to Math.random.
+function uid(): string {
+  try { return crypto.randomUUID(); } catch { /* not available */ }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 // ─── Smart local scheduler ────────────────────────────────────────────────────
 
@@ -71,7 +94,7 @@ function buildSchedule(brainState: BrainState, userTasks: UserTask[]): PlanRespo
     // Insert a break if we've hit the threshold
     if (minutesSinceBreak >= breakThreshold) {
       result.push({
-        id: crypto.randomUUID(),
+        id: uid(),
         title: "Break",
         description: pickBreakDescription(breakCount++),
         duration: TASK_DURATIONS["break"][focus],
@@ -82,7 +105,7 @@ function buildSchedule(brainState: BrainState, userTasks: UserTask[]): PlanRespo
     }
 
     result.push({
-      id: crypto.randomUUID(),
+      id: uid(),
       title: task.title,
       duration,
       type: task.category,
@@ -94,7 +117,7 @@ function buildSchedule(brainState: BrainState, userTasks: UserTask[]): PlanRespo
 
   // Always close with a short wrap-up
   result.push({
-    id: crypto.randomUUID(),
+    id: uid(),
     title: "Wrap up & reflect",
     description:
       "Note what you finished, what's carrying over, and the one thing you're proud of today.",
@@ -118,7 +141,7 @@ function buildSchedule(brainState: BrainState, userTasks: UserTask[]): PlanRespo
       : `Focus is low today — gentle start with routine and admin, building up gradually. Plenty of breathing room. Total: ~${timeStr}.`;
 
   return {
-    planId: crypto.randomUUID(),
+    planId: uid(),
     tasks: result,
     rationale,
     createdAt: new Date().toISOString(),
@@ -133,7 +156,7 @@ function localIntervention(stuckTask: PlanTask, remainingTasks: PlanTask[]): Int
       "Being stuck is completely valid — it happens when your brain is working hard. Let's not fight it. I've broken this down into smaller steps so you can ease back in.",
     restructuredTasks: [
       {
-        id: crypto.randomUUID(),
+        id: uid(),
         title: `Start tiny: just open "${stuckTask.title}"`,
         description: "You don't have to finish it — just open it and look at it for 2 minutes.",
         duration: 5,
@@ -141,7 +164,7 @@ function localIntervention(stuckTask: PlanTask, remainingTasks: PlanTask[]): Int
         completed: false,
       },
       {
-        id: crypto.randomUUID(),
+        id: uid(),
         title: "Grounding break",
         description: "30 seconds of slow breathing — in for 4, hold for 4, out for 4.",
         duration: 5,
@@ -149,7 +172,7 @@ function localIntervention(stuckTask: PlanTask, remainingTasks: PlanTask[]): Int
         completed: false,
       },
       {
-        id: crypto.randomUUID(),
+        id: uid(),
         title: `Continue: ${stuckTask.title}`,
         description: stuckTask.description ?? "Pick back up where you left off.",
         duration: Math.max(10, (stuckTask.duration ?? 30) - 10),
@@ -170,6 +193,7 @@ export interface UseDailyPlanReturn {
   setBrainState: (state: BrainState) => void;
   plan: PlanResponse | null;
   isGenerating: boolean;
+  progressMessage: string | null;
   generateDailyPlan: (userTasks: UserTask[]) => Promise<void>;
   isIntervening: boolean;
   intervention: InterventionResponse | null;
@@ -189,6 +213,29 @@ export function useDailyPlan(): UseDailyPlanReturn {
   const [isIntervening, setIsIntervening] = useState(false);
   const [intervention, setIntervention] = useState<InterventionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progressMessage, setProgressMessage] = useState<string | null>(null);
+
+  // Helper: connect WebSocket for real-time agent progress
+  function connectProgressWs(): WebSocket | null {
+    if (!user?.id) return null;
+    try {
+      const wsUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
+        .replace(/^http/, "ws");
+      const ws = new WebSocket(`${wsUrl}/ws/agent-progress/${user.id}`);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type !== "heartbeat" && data.message) {
+            setProgressMessage(data.message);
+          }
+        } catch { /* ignore parse errors */ }
+      };
+      ws.onerror = () => { /* silently ignore WS errors — HTTP API is primary */ };
+      return ws;
+    } catch {
+      return null;
+    }
+  }
 
   const generateDailyPlan = useCallback(
     async (userTasks: UserTask[]) => {
@@ -196,20 +243,30 @@ export function useDailyPlan(): UseDailyPlanReturn {
       setIsGenerating(true);
       setError(null);
       setIntervention(null);
+      setProgressMessage("Connecting to AI agents...");
+
+      const ws = connectProgressWs();
+      const planStart = Date.now();
 
       try {
-        const res = await api.post<PlanResponse>("/plan/generate", {
-          userId: user?.id ?? "guest",
-          brainState,
+        const res = await api.post<PlanResponse>("/api/plan/generate", {
+          brainState: toBackendBrainState(brainState),
           userTasks,
           profile: user?.background ?? null,
         });
         setPlan(res.data);
+        trackAnalyticsEvent(
+          "plan_generated",
+          { brainState: toBackendBrainState(brainState), taskCount: userTasks.length },
+          Date.now() - planStart,
+        );
       } catch {
         // Backend unavailable — build locally from the user's real tasks
         setPlan(buildSchedule(brainState, userTasks));
       } finally {
+        ws?.close();
         setIsGenerating(false);
+        setProgressMessage(null);
       }
     },
     [brainState, user]
@@ -220,16 +277,22 @@ export function useDailyPlan(): UseDailyPlanReturn {
       if (!plan) return;
       setIsIntervening(true);
       setError(null);
+      setProgressMessage("Attune is listening...");
 
       const stuckTask = plan.tasks[taskIndex];
       const remainingTasks = plan.tasks.slice(taskIndex + 1);
+      const ws = connectProgressWs();
+
+      trackAnalyticsEvent("intervention_triggered", {
+        stuckTaskIndex: taskIndex,
+        stuckTaskTitle: stuckTask.title,
+      });
 
       try {
-        const res = await api.post<InterventionResponse>("/plan/intervene", {
-          userId: user?.id ?? "guest",
+        const res = await api.post<InterventionResponse>("/api/plan/intervene", {
           planId: plan.planId,
-          taskIndex,
-          message,
+          stuckTaskIndex: taskIndex,
+          userMessage: message,
         });
         const result = res.data;
         setIntervention(result);
@@ -243,7 +306,9 @@ export function useDailyPlan(): UseDailyPlanReturn {
           p ? { ...p, tasks: [...p.tasks.slice(0, taskIndex), ...fallback.restructuredTasks] } : p
         );
       } finally {
+        ws?.close();
         setIsIntervening(false);
+        setProgressMessage(null);
       }
     },
     [plan, user]
@@ -272,7 +337,7 @@ export function useDailyPlan(): UseDailyPlanReturn {
 
   return {
     brainState, setBrainState,
-    plan, isGenerating, generateDailyPlan,
+    plan, isGenerating, progressMessage, generateDailyPlan,
     isIntervening, intervention, triggerStuck, clearIntervention,
     toggleTaskComplete, resetPlan, error,
   };

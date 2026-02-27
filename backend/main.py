@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
-from app.routes import auth, screening, profile, plan, dashboard
+from app.routes import auth, screening, profile, plan, dashboard, user, feedback, analytics
+from app.routes.websocket import router as ws_router
 
 settings = get_settings()
 
@@ -28,6 +29,10 @@ app.include_router(screening.router, prefix="/api/screening", tags=["screening"]
 app.include_router(profile.router, prefix="/api/profile", tags=["profile"])
 app.include_router(plan.router, prefix="/api/plan", tags=["plan"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
+app.include_router(user.router, prefix="/api/user", tags=["user"])
+app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(ws_router, tags=["websocket"])
 
 
 @app.get("/")

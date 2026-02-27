@@ -119,6 +119,13 @@ export interface Hypothesis {
   evidence: string[];
 }
 
+export interface FeedbackHistoryItem {
+  id: string;
+  rating: number;
+  feedback?: string | null;
+  date: string;
+}
+
 export interface DashboardData {
   momentumScore: number;     // 0–100
   momentumDelta: number;     // signed delta vs previous period
@@ -199,36 +206,9 @@ export interface ApiError {
   status: number;
 }
 
-// ─── Brain State ─────────────────────────────────────────────────────────────
+// ─── Backend Brain State ─────────────────────────────────────────────────────
+// The backend expects one of these three strings for plan generation.
+// Use toBackendBrainState() in useDailyPlan.ts to map from the UI's
+// BrainState object { focusLevel, energyLevel, moodLevel } to this value.
 
-export type BrainState = "foggy" | "focused" | "wired";
-
-// ─── Daily Plan (matches backend Task model) ─────────────────────────────────
-
-export interface PlanTask {
-  index: number;
-  title: string;
-  description: string;
-  duration_minutes: number;
-  time_slot: string;
-  category: string;
-  rationale: string;
-  priority: string;
-  status: string;
-}
-
-export interface PlanResponse {
-  planId: string;
-  tasks: PlanTask[];
-  overallRationale: string;
-}
-
-// ─── Intervention ────────────────────────────────────────────────────────────
-
-export interface InterventionResponse {
-  interventionId: string;
-  acknowledgment: string;
-  restructuredTasks: PlanTask[];
-  agentReasoning: string;
-  followupHint?: string;
-}
+export type BackendBrainState = "foggy" | "focused" | "wired";
