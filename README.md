@@ -578,8 +578,8 @@ Built by a two-person team. Work is divided by feature (end-to-end ownership) ra
 
 | Name | Role |
 |------|------|
-| **Aryama Ray** | AI Consultant | https://www.linkedin.com/in/aryamaray/
-| **Debisree Ray** | Data Scientist | https://www.linkedin.com/in/debisree-ray-ph-d-82241355/
+| **Aryama Ray** | AI Consultant | https://www.linkedin.com/in/aryamaray/ |
+| **Debisree Ray** | Data Scientist | https://www.linkedin.com/in/debisree-ray-ph-d-82241355/ |
 
 ---
 
