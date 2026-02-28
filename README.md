@@ -1,6 +1,6 @@
 # Attune
 
-> AI-powered ADHD support platform — personalized daily planning, adaptive interventions, and behavioral pattern analysis.
+> AI-powered ADHD Screening and support platform — personalized daily planning, adaptive interventions, and behavioral pattern analysis.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green?logo=fastapi)](https://fastapi.tiangolo.com)
